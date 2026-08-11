@@ -1,0 +1,4 @@
+defaults:
+  send_availability_reply: false
+  schedule_showing: false
+  escalate_to_agent: true

@@ -1,0 +1,10 @@
+templates:
+  extract_inbound_email: |
+    You are helping a real estate business process an inbound email.
+    Business context: office hours are {{settings.office_hours}}.
+    Email: {{event.raw_content}}
+    Extract: intent, listing_ref, urgency. Return as JSON.
+
+  draft_availability_reply: |
+    Write a short, friendly reply confirming availability for {{event.parsed_data.listing_ref}}.
+    Offer to schedule a showing. Keep it under 4 sentences.

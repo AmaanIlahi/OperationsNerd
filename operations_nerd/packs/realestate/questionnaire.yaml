@@ -1,0 +1,16 @@
+questions:
+  - id: office_hours
+    label: "What are your office hours?"
+    type: text
+    settings_key: office_hours
+
+  - id: default_follow_up_days
+    label: "How many days after first contact should a follow-up be due?"
+    type: number
+    settings_key: default_follow_up_days
+
+  - id: property_types
+    label: "Which property types do you handle?"
+    type: multiselect
+    options: [condo, single_family, multi_family, commercial]
+    settings_key: property_types
