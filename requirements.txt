@@ -1,2 +1,5 @@
 pydantic
 pyyaml
+fastapi
+uvicorn
+httpx
