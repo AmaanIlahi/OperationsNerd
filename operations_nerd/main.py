@@ -7,6 +7,9 @@ Interactive API docs: http://127.0.0.1:8000/docs
 Frontend (questionnaire + live state view): http://127.0.0.1:8000/ui/
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
