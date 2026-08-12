@@ -186,6 +186,15 @@ def mark_event_processed(conn, event_id: int, parsed_data: dict):
     )
 
 
+def list_events(conn, business_id: int) -> list[dict]:
+    """All events for a business, any processed state. Used by the state view,
+    not just the pending-work views."""
+    rows = conn.execute(
+        "SELECT * FROM events WHERE business_id = ? ORDER BY received_at", (business_id,)
+    ).fetchall()
+    return [_row_to_dict(r, json_fields=("parsed_data",)) for r in rows]
+
+
 # ---------- drafted_actions ----------
 
 def create_drafted_action(conn, event_id: int, business_id: int, action_type: str,
@@ -201,6 +210,17 @@ def create_drafted_action(conn, event_id: int, business_id: int, action_type: st
 def list_pending_actions(conn, business_id: int) -> list[dict]:
     rows = conn.execute(
         "SELECT * FROM drafted_actions WHERE business_id = ? AND status = 'pending_approval' ORDER BY created_at",
+        (business_id,),
+    ).fetchall()
+    return [_row_to_dict(r, json_fields=("payload",)) for r in rows]
+
+
+def list_drafted_actions(conn, business_id: int) -> list[dict]:
+    """All drafted actions regardless of status. Used by the state view to
+    show the full lifecycle (pending -> approved/rejected -> sent), not just
+    what's currently waiting on a human."""
+    rows = conn.execute(
+        "SELECT * FROM drafted_actions WHERE business_id = ? ORDER BY created_at",
         (business_id,),
     ).fetchall()
     return [_row_to_dict(r, json_fields=("payload",)) for r in rows]
@@ -231,6 +251,13 @@ def is_auto_approved(conn, business_id: int, action_type: str) -> bool:
         (business_id, action_type),
     ).fetchone()
     return bool(row["auto_approve"]) if row else False
+
+
+def list_approval_policies(conn, business_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM approval_policies WHERE business_id = ? ORDER BY action_type", (business_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 if __name__ == "__main__":
