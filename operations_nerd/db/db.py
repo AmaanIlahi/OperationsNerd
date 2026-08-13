@@ -186,6 +186,11 @@ def mark_event_processed(conn, event_id: int, parsed_data: dict):
     )
 
 
+def get_event(conn, event_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    return _row_to_dict(row, json_fields=("parsed_data",)) if row else None
+
+
 def list_events(conn, business_id: int) -> list[dict]:
     """All events for a business, any processed state. Used by the state view,
     not just the pending-work views."""

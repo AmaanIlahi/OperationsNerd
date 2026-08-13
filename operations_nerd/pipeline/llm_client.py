@@ -32,19 +32,27 @@ def get_client():
 def call_llm(prompt: str, response_schema=None) -> str:
     """Sends prompt to Gemini and returns the raw text response.
 
-    If response_schema is given (a Pydantic model class), asks Gemini for
-    structured JSON matching that schema instead of free-form text. The
-    caller is responsible for parsing/validating the returned JSON string,
-    this function just returns text either way, to keep its own contract
-    simple.
+    response_schema can be a Pydantic model class (its .model_json_schema()
+    is used), or a raw JSON schema dict directly -- the pipeline needs the
+    dict form, since valid action_types come from the pack at runtime and
+    can't be expressed as a static Pydantic model known in advance.
+
+    The caller is responsible for parsing/validating the returned JSON
+    string; this function just returns text either way, to keep its own
+    contract simple.
     """
     client = get_client()
     kwargs = {"model": MODEL, "input": prompt}
     if response_schema is not None:
+        schema_dict = (
+            response_schema.model_json_schema()
+            if hasattr(response_schema, "model_json_schema")
+            else response_schema
+        )
         kwargs["response_format"] = {
             "type": "text",
             "mime_type": "application/json",
-            "schema": response_schema.model_json_schema(),
+            "schema": schema_dict,
         }
     interaction = client.interactions.create(**kwargs)
     return interaction.output_text
