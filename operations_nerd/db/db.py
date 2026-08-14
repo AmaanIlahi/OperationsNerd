@@ -212,6 +212,11 @@ def create_drafted_action(conn, event_id: int, business_id: int, action_type: st
     return cur.lastrowid
 
 
+def get_drafted_action(conn, action_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM drafted_actions WHERE id = ?", (action_id,)).fetchone()
+    return _row_to_dict(row, json_fields=("payload",)) if row else None
+
+
 def list_pending_actions(conn, business_id: int) -> list[dict]:
     rows = conn.execute(
         "SELECT * FROM drafted_actions WHERE business_id = ? AND status = 'pending_approval' ORDER BY created_at",

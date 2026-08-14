@@ -16,12 +16,14 @@ from fastapi.staticfiles import StaticFiles
 from questionnaire.routes import router as questionnaire_router
 from state.routes import router as state_router
 from pipeline.routes import router as pipeline_router
+from approval.routes import router as approval_router
 
 app = FastAPI(title="Operations Nerd")
 
 app.include_router(questionnaire_router)
 app.include_router(state_router)
 app.include_router(pipeline_router)
+app.include_router(approval_router)
 
 # Mounted at /ui, not /, so it never conflicts with API routes like
 # /businesses or /packs/{pack_id}/questionnaire.

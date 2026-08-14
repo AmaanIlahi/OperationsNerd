@@ -27,6 +27,7 @@ from db import db as d
 from packs.loader import Pack
 from pipeline.llm_client import call_llm
 from pipeline.templating import render_template
+from approval.service import maybe_auto_approve
 import json
 
 
@@ -120,9 +121,13 @@ def process_event(conn, pack: Pack, event_id: int) -> dict:
         payload={"body": draft_text},
     )
 
+    auto_approved = maybe_auto_approve(conn, drafted_action_id)
+    status = auto_approved["status"] if auto_approved else "pending_approval"
+
     return {
         "id": drafted_action_id,
         "action_type": action_type,
         "payload": {"body": draft_text},
         "parsed_data": parsed,
+        "status": status,
     }

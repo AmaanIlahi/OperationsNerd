@@ -276,8 +276,7 @@ function render(state) {
     ['id','contact_id','type','status','due_date','notes'], ['extension_data']);
   renderTable('eventsTable', state.events, prevState?.events,
     ['id','contact_id','source','processed','received_at','raw_content'], ['parsed_data']);
-  renderTable('draftedActionsTable', state.drafted_actions, prevState?.drafted_actions,
-    ['id','event_id','contact_id','action_type','status'], ['payload']);
+  renderDraftedActionsTable(state.drafted_actions, prevState?.drafted_actions);
   renderTable('approvalPoliciesTable', state.approval_policies, prevState?.approval_policies,
     ['id','action_type','auto_approve'], []);
 }
@@ -322,6 +321,48 @@ function formatCell(v) {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   return String(v);
+}
+
+// ---------- drafted actions (approve/reject) ----------
+
+function renderDraftedActionsTable(rows, prevRows) {
+  const container = $('draftedActionsTable');
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">None yet.</div>';
+    return;
+  }
+  const coreCols = ['id','event_id','contact_id','action_type','status'];
+  const diff = diffIds(prevRows, rows);
+  let html = '<table><thead><tr>';
+  for (const c of coreCols) html += `<th class="core">${c}</th>`;
+  html += '<th class="config">payload</th><th class="core">actions</th>';
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += `<tr class="${rowClass(row.id, diff)}">`;
+    for (const c of coreCols) html += `<td class="core">${formatCell(row[c])}</td>`;
+    html += `<td class="config"><code class="kv">${JSON.stringify(row.payload ?? {}, null, 2)}</code></td>`;
+    if (row.status === 'pending_approval') {
+      html += `<td class="core">
+        <button class="secondary" onclick="approveAction(${row.id})">Approve</button>
+        <button class="secondary" onclick="rejectAction(${row.id})">Reject</button>
+      </td>`;
+    } else {
+      html += '<td class="core"></td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function approveAction(actionId) {
+  await fetch(`/drafted-actions/${actionId}/approve`, { method: 'POST' });
+  fetchState();
+}
+
+async function rejectAction(actionId) {
+  await fetch(`/drafted-actions/${actionId}/reject`, { method: 'POST' });
+  fetchState();
 }
 </script>
 </body>
