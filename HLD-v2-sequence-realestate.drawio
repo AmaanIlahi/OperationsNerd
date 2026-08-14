@@ -1,0 +1,207 @@
+<mxfile>
+  <diagram id="seqlayout" name="Real Estate Walkthrough — Logging a Lead Call">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="agent" value="RE Agent&#xa;(Owner)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;participant=umlActor;verticalAlign=bottom;spacingBottom=-14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="console" value="Web Console" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="300" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="api" value="API Gateway" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="560" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="ingest" value="Event Ingest" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="820" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="worker" value="Runtime Worker&#xa;(Temporal)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="comp" value="Compliance&#xa;Engine" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="drafter" value="Action Drafter&#xa;(LLM)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="hitl" value="HITL Queue" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="1860" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="outbox" value="Outbox + Saga" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="2120" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="db" value="Postgres&#xa;(RLS)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="2380" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="connectors" value="Adapters&#xa;(Gmail/CRM/...)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="2640" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="lead" value="Lead&#xa;(Customer)" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;" vertex="1" parent="1">
+          <mxGeometry x="2900" y="40" width="100" height="2160" as="geometry"/>
+        </mxCell>
+        <mxCell id="act0" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="worker">
+          <mxGeometry x="45" y="290" width="10" height="720" as="geometry"/>
+        </mxCell>
+        <mxCell id="act1" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="hitl">
+          <mxGeometry x="45" y="1060" width="10" height="350" as="geometry"/>
+        </mxCell>
+        <mxCell id="act2" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="connectors">
+          <mxGeometry x="45" y="1660" width="10" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="act3" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="outbox">
+          <mxGeometry x="45" y="1460" width="10" height="400" as="geometry"/>
+        </mxCell>
+        <mxCell id="act4" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="worker">
+          <mxGeometry x="45" y="1160" width="10" height="750" as="geometry"/>
+        </mxCell>
+        <mxCell id="act5" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="console">
+          <mxGeometry x="45" y="90" width="10" height="2030" as="geometry"/>
+        </mxCell>
+        <mxCell id="act6" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="api">
+          <mxGeometry x="45" y="140" width="10" height="1980" as="geometry"/>
+        </mxCell>
+        <mxCell id="act7" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="ingest">
+          <mxGeometry x="45" y="190" width="10" height="1930" as="geometry"/>
+        </mxCell>
+        <mxCell id="act8" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="db">
+          <mxGeometry x="45" y="240" width="10" height="1880" as="geometry"/>
+        </mxCell>
+        <mxCell id="act9" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="drafter">
+          <mxGeometry x="45" y="410" width="10" height="1710" as="geometry"/>
+        </mxCell>
+        <mxCell id="act10" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="comp">
+          <mxGeometry x="45" y="810" width="10" height="1310" as="geometry"/>
+        </mxCell>
+        <mxCell id="act11" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="agent">
+          <mxGeometry x="45" y="1260" width="10" height="860" as="geometry"/>
+        </mxCell>
+        <mxCell id="act12" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;" vertex="1" parent="lead">
+          <mxGeometry x="45" y="1710" width="10" height="410" as="geometry"/>
+        </mxCell>
+        <mxCell id="m0" value="Log call with lead Jane Doe (5 min, discussed 123 Main St)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.0417;entryX=0;entryY=0.0;" edge="1" parent="1" source="agent" target="act5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="POST /events (raw call notes + audio transcript)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0246;entryX=0;entryY=0.0;" edge="1" parent="1" source="act5" target="act6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2" value="enqueue with idempotency key" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0253;entryX=0;entryY=0.0;" edge="1" parent="1" source="act6" target="act7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3" value="INSERT event (tenant, source_event_id) ON CONFLICT skip" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0259;entryX=0;entryY=0.0;" edge="1" parent="1" source="act7" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m4" value="start Temporal workflow (run_id)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0518;entryX=0;entryY=0.0;" edge="1" parent="1" source="act7" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m5" value="stage 2: Validity Gate (LLM judge + rule prefilter)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0694;entryX=1;entryY=0.1111;" edge="1" parent="1" source="act0" target="act0">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1190" y="380"/><mxPoint x="1190" y="410"/></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m6" value="judge: is this a real engagement?" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.1667;entryX=0;entryY=0.0;" edge="1" parent="1" source="act0" target="act9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7" value="pass (real call transcript, valid contact)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.0292;entryX=1;entryY=0.2361;" edge="1" parent="1" source="act9" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m8" value="stage 3: Ontology Conversion" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.3056;entryX=0;entryY=0.0585;" edge="1" parent="1" source="act0" target="act9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m9" value="Party(Lead=Jane Doe) + Engagement(Call) + Note(attrs)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.0877;entryX=1;entryY=0.375;" edge="1" parent="1" source="act9" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10" value="stage 4: Context Extraction (read prior Engagements, related listings)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.4444;entryX=0;entryY=0.1968;" edge="1" parent="1" source="act0" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m11" value="Jane Doe has 3 prior calls, viewed 2 listings, no active Agreement" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.2234;entryX=1;entryY=0.5139;" edge="1" parent="1" source="act8" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m12" value="stage 5: Function Classification" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.5833;entryX=0;entryY=0.1754;" edge="1" parent="1" source="act0" target="act9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m13" value="→ sales (lead with property interest, no obligation yet)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.2047;entryX=1;entryY=0.6528;" edge="1" parent="1" source="act9" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m14" value="stage 6: Compliance &amp; Safety (RE disclosure, PII)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.7222;entryX=0;entryY=0.0;" edge="1" parent="1" source="act0" target="act10">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m15" value="pass (no PII to redact, no financial threshold)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.0382;entryX=1;entryY=0.7917;" edge="1" parent="1" source="act10" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m16" value="stage 7: Action Drafting (3 actions)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.8611;entryX=0;entryY=0.2924;" edge="1" parent="1" source="act0" target="act9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m17" value="drafts: [SetObligation(follow-up call +3d), SendEmail(thank you, references 123 Main St), LogTransaction(call_log)]" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.3216;entryX=1;entryY=0.9306;" edge="1" parent="1" source="act9" target="act0">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m18" value="classify each: [auto, requires_approval, auto]" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=1.0;entryX=0;entryY=0.3509;" edge="1" parent="1" source="act0" target="act9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m19" value="stage 8: enqueue SendEmail for approval" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.4907;entryX=0;entryY=0.0;" edge="1" parent="1" source="worker" target="act1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m20" value="INSERT approval row (event_id, action, evidence)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.5139;entryX=0;entryY=0.4628;" edge="1" parent="1" source="worker" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m21" value="ok" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.4894;entryX=1;entryY=0.0;" edge="1" parent="1" source="act8" target="act4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m22" value="10b: SSE — 'draft ready for review'" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.0667;entryX=1;entryY=0.5517;" edge="1" parent="1" source="act4" target="act5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m23" value="show approval queue (drafted email + evidence)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.5764;entryX=1;entryY=0.0;" edge="1" parent="1" source="act5" target="act11">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m24" value="approve (with minor edit to subject line)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.0581;entryX=0;entryY=0.601;" edge="1" parent="1" source="act11" target="act5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m25" value="PATCH /approvals/{id} → approved+edited" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.6256;entryX=0;entryY=0.8571;" edge="1" parent="1" source="act5" target="act1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m26" value="resume workflow (signal: approved)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=1.0;entryX=1;entryY=0.3333;" edge="1" parent="1" source="act1" target="act4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m27" value="stage 9: write outbox row + state changes in same tx" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.4;entryX=0;entryY=0.0;" edge="1" parent="1" source="act4" target="act3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m28" value="INSERT outbox (four-tuple key, payload)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.125;entryX=0;entryY=0.6755;" edge="1" parent="1" source="act3" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m29" value="INSERT party, engagement, obligation, event (all 4 actions)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.25;entryX=0;entryY=0.7021;" edge="1" parent="1" source="act3" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m30" value="COMMIT (atomic state + intent)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.7287;entryX=1;entryY=0.375;" edge="1" parent="1" source="act8" target="act3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m31" value="drainer: dispatch 3 actions (idempotent)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.5;entryX=0;entryY=0.0;" edge="1" parent="1" source="act3" target="act2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m32" value="send thank-you email (Gmail API)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.3333;entryX=0;entryY=0.0;" edge="1" parent="1" source="act2" target="act12">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m33" value="200 OK" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.122;entryX=1;entryY=0.6667;" edge="1" parent="1" source="act12" target="act2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m34" value="UPDATE outbox SET status=sent; audit row written" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=1.0;entryX=1;entryY=0.8351;" edge="1" parent="1" source="act2" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m35" value="workflow complete" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=1.0;entryX=1;entryY=0.9333;" edge="1" parent="1" source="act3" target="act4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m36" value="stage 10a: append final Event row (XES-extended)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=1.0;entryX=0;entryY=0.8883;" edge="1" parent="1" source="act4" target="act8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m37" value="10b: SSE — 'event complete' (with summary)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.9074;entryX=1;entryY=0.9212;" edge="1" parent="1" source="worker" target="act5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m38" value="show 'Logged call with Jane Doe. Follow-up set for Thu. Email sent.'" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0;exitY=0.9458;entryX=1;entryY=0.8721;" edge="1" parent="1" source="act5" target="act11">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="note39" value="If the agent had rejected the draft, the workflow would route to a 'promote-to-policy' prompt and the outbox row would be discarded (compensation = no-op since no external action ran)." style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="2080" width="200" height="40" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

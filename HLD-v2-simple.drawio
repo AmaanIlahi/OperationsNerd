@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Simple + Extensions" id="simple-main">
+    <mxGraphModel dx="2000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="100" value="Operations Nerd — extensible architecture" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1620" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="101" value="Three boxes for v1 (ship now). Four extension points for v2/v3 (layered later, no redesign)." style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="40" y="58" width="1620" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- =================== v1 CORE: 3 BOXES + ACTION =================== -->
+
+        <mxCell id="200" value="PLANE 1 — Onboarding (one-time, per business)&#xa;&#xa;1. Setup Questionnaire&#xa;&#xa;Owner fills this once. System learns the vertical, the rules, the compliance profile." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="140" width="380" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="201" value="PLANE 2 — Event Runtime (per inbound event)&#xa;&#xa;2. Event Pipeline&#xa;&#xa;Every inbound email, call, form becomes a structured action. Pure processing." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="140" width="380" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="202" value="PLANE 2 (cont.) —&#xa;&#xa;3. Human Approval&#xa;&#xa;Before any action goes out (email sent, invoice posted, calendar updated). Default = ask." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="960" y="140" width="380" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="203" value="→ ACTION&#xa;&#xa;email sent&#xa;invoice posted&#xa;calendar updated" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=center;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="180" width="220" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows in the v1 core -->
+        <mxCell id="300" value="configures" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="200" target="201">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="301" value="proposes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#6c8ebf;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="201" target="202">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="302" value="approved" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#d6b656;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="202" target="203">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Event log (lives in v1 from day 1) -->
+        <mxCell id="400" value="Event Log&#xa;(every action is recorded)&#xa;always there, even in v1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;dashPattern=4 4;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="520" y="400" width="380" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="401" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;dashPattern=4 4;strokeColor=#d6b656;endArrow=open;" edge="1" parent="1" source="201" target="400">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- =================== v2/v3 EXTENSION POINTS (below the core) =================== -->
+
+        <mxCell id="500" value="EXTENSION POINTS&#xa;(layered on top of v1, no redesign)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#666666;dashed=1;dashPattern=8 4;align=center;verticalAlign=top;fontStyle=1;fontSize=12;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="520" width="1580" height="340" as="geometry" />
+        </mxCell>
+
+        <mxCell id="501" value="v2 — Snapshot Model&#xa;&#xa;Wraps step 1.&#xa;&#xa;Version the config like git.&#xa;Owner can roll back.&#xa;Diff between versions.&#xa;&#xa;(add when you need versioning)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;dashed=1;dashPattern=4 4;align=center;" vertex="1" parent="1">
+          <mxGeometry x="100" y="560" width="360" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="502" value="v2 — Outbox + Saga&#xa;&#xa;Between step 2 and step 3.&#xa;&#xa;Side effects are atomic.&#xa;Compensation on failure.&#xa;No action is lost.&#xa;&#xa;(add when money is in the loop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;dashed=1;dashPattern=4 4;align=center;" vertex="1" parent="1">
+          <mxGeometry x="490" y="560" width="360" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="503" value="v2 — RLS Multi-tenancy&#xa;&#xa;Under step 2's data.&#xa;&#xa;One database, many businesses.&#xa;Tenant isolation at the row.&#xa;Safe by default.&#xa;&#xa;(add when you have 2+ tenants)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;dashed=1;dashPattern=4 4;align=center;" vertex="1" parent="1">
+          <mxGeometry x="880" y="560" width="360" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="504" value="v3 — Discovery Loop&#xa;&#xa;Reads step 2's event log.&#xa;&#xa;System proposes config changes&#xa;from real usage patterns.&#xa;Owner approves before applying.&#xa;&#xa;(add when you have 90 days of data)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;dashed=1;dashPattern=4 4;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="560" width="360" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows from extension points to v1 core (showing what they extend) -->
+        <mxCell id="600" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=1.5;dashed=1;dashPattern=4 4;endArrow=open;" edge="1" parent="1" source="501" target="200">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="601" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#b85450;strokeWidth=1.5;dashed=1;dashPattern=4 4;endArrow=open;" edge="1" parent="1" source="502" target="202">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="602" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#82b366;strokeWidth=1.5;dashed=1;dashPattern=4 4;endArrow=open;" edge="1" parent="1" source="503" target="201">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="603" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=1.5;dashed=1;dashPattern=4 4;endArrow=open;" edge="1" parent="1" source="504" target="400">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- =================== LEGEND =================== -->
+
+        <mxCell id="700" value="Solid boxes + arrows = v1 (what we build now). Dashed boxes = v2/v3 extensions (what we build later, layered on top). Each extension is independent — add them when you need them, not preemptively." style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="1580" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
