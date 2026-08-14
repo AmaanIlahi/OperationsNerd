@@ -1,0 +1,10 @@
+templates:
+  extract_inbound_email: |
+    You are helping a health club business process an inbound email.
+    Business context: business hours are {{settings.business_hours}}, free trial is {{settings.free_trial_days}} days.
+    Email: {{event.raw_content}}
+    Extract: intent, membership_type_ref, urgency. Return as JSON.
+
+  send_trial_info: |
+    Write a short, friendly reply letting the prospect know about the {{settings.free_trial_days}}-day free trial.
+    Mention membership options if relevant. Keep it under 4 sentences.

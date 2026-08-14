@@ -1,0 +1,7 @@
+schemas:
+  - event_type: inbound_email
+    extract_fields: [intent, listing_ref, urgency]
+    valid_action_types:
+      - send_availability_reply
+      - schedule_showing
+      - escalate_to_agent

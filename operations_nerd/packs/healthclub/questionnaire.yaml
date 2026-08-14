@@ -1,0 +1,21 @@
+questions:
+  - id: business_hours
+    label: "What are your business hours?"
+    type: text
+    settings_key: business_hours
+
+  - id: free_trial_days
+    label: "How many days is your free trial period?"
+    type: number
+    settings_key: free_trial_days
+
+  - id: membership_types
+    label: "Which membership types do you offer?"
+    type: multiselect
+    options: [basic, premium, family, student]
+    settings_key: membership_types
+
+  - id: offers_personal_training
+    label: "Do you offer personal training?"
+    type: boolean
+    settings_key: offers_personal_training

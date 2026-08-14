@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Operations Nerd — Live State</title>
+<style>
+  :root {
+    --core-bg: #f4f4f2;
+    --core-border: #d8d8d4;
+    --config-bg: #fff3d6;
+    --config-border: #e8c568;
+    --new-flash: #bdf5c8;
+    --changed-flash: #fff2a3;
+    --text: #2b2b28;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #fafaf8;
+    color: var(--text);
+    margin: 0;
+    padding: 24px 32px 64px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #706f68; font-size: 13px; margin-bottom: 20px; }
+
+  .legend {
+    display: flex; gap: 18px; align-items: center;
+    font-size: 12px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #0002; }
+
+  section {
+    background: #fff; border: 1px solid #e6e5e0; border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  section h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #55544d; }
+
+  label { display: block; font-size: 13px; margin: 10px 0 4px; font-weight: 600; }
+  input[type=text], input[type=number] {
+    width: 100%; max-width: 360px; padding: 7px 9px; border: 1px solid #ccc;
+    border-radius: 6px; font-size: 13px; box-sizing: border-box;
+  }
+  .checkbox-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+  .checkbox-row label { display: flex; align-items: center; gap: 5px; font-weight: 400; margin: 0; }
+
+  button {
+    margin-top: 16px; padding: 8px 16px; border: none; border-radius: 6px;
+    background: #2b2b28; color: #fff; font-size: 13px; cursor: pointer;
+  }
+  button.secondary { background: #eceae3; color: #2b2b28; margin-left: 8px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .errors { color: #b3261e; font-size: 13px; margin-top: 10px; }
+  .errors ul { margin: 4px 0 0; padding-left: 18px; }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border: 1px solid var(--core-border); vertical-align: top; }
+  th { background: #f0efeb; font-weight: 600; }
+  td.core, th.core { background: var(--core-bg); }
+  td.config, th.config { background: var(--config-bg); border-color: var(--config-border); }
+  .empty-note { color: #918f86; font-size: 12.5px; font-style: italic; }
+
+  code.kv { display: block; white-space: pre-wrap; font-size: 12px; }
+
+  @keyframes flashNew { from { background-color: var(--new-flash); } to { background-color: inherit; } }
+  @keyframes flashChanged { from { background-color: var(--changed-flash); } to { background-color: inherit; } }
+  tr.row-new td { animation: flashNew 2.2s ease-out; animation-fill-mode: none; }
+  tr.row-changed td { animation: flashChanged 2.2s ease-out; animation-fill-mode: none; }
+
+  #statusLine { font-size: 12px; color: #918f86; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Operations Nerd — Live State</h1>
+<div class="subtitle">Setup Questionnaire → business creation → live database state. Nothing here is real-estate-specific code, the questions and config fields come entirely from the loaded Config Pack.</div>
+
+<div class="legend">
+  <div class="legend-item"><span class="swatch" style="background:var(--core-bg);border-color:var(--core-border)"></span> Core engine (same for every industry)</div>
+  <div class="legend-item"><span class="swatch" style="background:var(--config-bg);border-color:var(--config-border)"></span> Config Pack data (industry-specific)</div>
+  <div class="legend-item"><span class="swatch" style="background:var(--new-flash)"></span> Just created</div>
+  <div class="legend-item"><span class="swatch" style="background:var(--changed-flash)"></span> Just changed</div>
+</div>
+
+<section id="setup">
+  <h2>Setup Questionnaire</h2>
+  <label>Config Pack id</label>
+  <select id="packId"></select>
+  <label>Business name</label>
+  <input type="text" id="businessName" placeholder="e.g. Riverbend Realty">
+
+  <div id="questionsContainer"></div>
+
+  <div class="errors" id="formErrors"></div>
+  <button id="loadPackBtn">Load questionnaire</button>
+  <button id="submitBtn" class="secondary" disabled>Create business</button>
+</section>
+
+<section id="stateSection" style="display:none;">
+  <h2>Live System State</h2>
+  <div id="businessCard"></div>
+  <div id="statusLine"></div>
+  <button id="pauseBtn" class="secondary">Pause auto-refresh</button>
+  <button id="refreshBtn" class="secondary">Refresh now</button>
+
+  <h2 style="margin-top:22px;">Contacts</h2>
+  <div id="contactsTable"></div>
+
+  <h2 style="margin-top:22px;">Follow-ups</h2>
+  <div id="followUpsTable"></div>
+
+  <h2 style="margin-top:22px;">Events</h2>
+  <div id="eventsTable"></div>
+
+  <h2 style="margin-top:22px;">Drafted Actions</h2>
+  <div id="draftedActionsTable"></div>
+
+  <h2 style="margin-top:22px;">Approval Policies</h2>
+  <div id="approvalPoliciesTable"></div>
+</section>
+
+<script>
+let currentPack = null;
+let businessId = null;
+let prevState = null;
+let pollTimer = null;
+let paused = false;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- questionnaire ----------
+
+async function loadPackOptions() {
+  const select = $('packId');
+  try {
+    const resp = await fetch('/packs');
+    const packs = await resp.json();
+    select.innerHTML = packs.map(p => `<option value="${p.id}">${p.display_name}</option>`).join('');
+  } catch (e) {
+    $('formErrors').textContent = `Error loading packs: ${e}`;
+  }
+}
+loadPackOptions();
+
+$('loadPackBtn').addEventListener('click', async () => {
+  const packId = $('packId').value.trim();
+  $('formErrors').innerHTML = '';
+  try {
+    const resp = await fetch(`/packs/${packId}/questionnaire`);
+    if (!resp.ok) {
+      const body = await resp.json();
+      $('formErrors').textContent = `Failed to load pack: ${body.detail}`;
+      return;
+    }
+    const data = await resp.json();
+    currentPack = data;
+    renderQuestions(data.questions);
+    $('submitBtn').disabled = false;
+  } catch (e) {
+    $('formErrors').textContent = `Error: ${e}`;
+  }
+});
+
+function renderQuestions(questions) {
+  const container = $('questionsContainer');
+  container.innerHTML = '';
+  for (const q of questions) {
+    const label = document.createElement('label');
+    label.textContent = q.label;
+    container.appendChild(label);
+
+    if (q.type === 'multiselect') {
+      const row = document.createElement('div');
+      row.className = 'checkbox-row';
+      for (const opt of q.options || []) {
+        const cbLabel = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = opt;
+        cb.dataset.qid = q.id;
+        cb.className = 'q-multiselect';
+        cbLabel.appendChild(cb);
+        cbLabel.append(' ' + opt);
+        row.appendChild(cbLabel);
+      }
+      container.appendChild(row);
+    } else if (q.type === 'boolean') {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.qid = q.id;
+      cb.className = 'q-boolean';
+      container.appendChild(cb);
+    } else {
+      const input = document.createElement('input');
+      input.type = q.type === 'number' ? 'number' : 'text';
+      input.dataset.qid = q.id;
+      input.dataset.qtype = q.type;
+      input.className = 'q-input';
+      container.appendChild(input);
+    }
+  }
+}
+
+function collectAnswers() {
+  const answers = {};
+  document.querySelectorAll('.q-input').forEach(el => {
+    const qid = el.dataset.qid;
+    if (el.value === '') return;
+    answers[qid] = el.dataset.qtype === 'number' ? Number(el.value) : el.value;
+  });
+  const multiGroups = {};
+  document.querySelectorAll('.q-multiselect:checked').forEach(el => {
+    const qid = el.dataset.qid;
+    (multiGroups[qid] ||= []).push(el.value);
+  });
+  Object.assign(answers, multiGroups);
+  document.querySelectorAll('.q-boolean').forEach(el => {
+    const qid = el.dataset.qid;
+    answers[qid] = el.checked;
+  });
+  return answers;
+}
+
+$('submitBtn').addEventListener('click', async () => {
+  $('formErrors').innerHTML = '';
+  const name = $('businessName').value.trim();
+  const packId = $('packId').value.trim();
+  if (!name) { $('formErrors').textContent = 'Business name is required.'; return; }
+
+  const answers = collectAnswers();
+  try {
+    const resp = await fetch('/businesses', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, industry_pack: packId, answers }),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      const issues = body.detail?.issues || [body.detail];
+      $('formErrors').innerHTML = '<strong>Could not create business:</strong><ul>' +
+        issues.map(i => `<li>${i}</li>`).join('') + '</ul>';
+      return;
+    }
+    businessId = body.business_id;
+    $('stateSection').style.display = 'block';
+    startPolling();
+  } catch (e) {
+    $('formErrors').textContent = `Error: ${e}`;
+  }
+});
+
+// ---------- state view ----------
+
+$('pauseBtn').addEventListener('click', () => {
+  paused = !paused;
+  $('pauseBtn').textContent = paused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+});
+$('refreshBtn').addEventListener('click', fetchState);
+
+function startPolling() {
+  fetchState();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => { if (!paused) fetchState(); }, 2500);
+}
+
+async function fetchState() {
+  if (!businessId) return;
+  const resp = await fetch(`/businesses/${businessId}/state`);
+  if (!resp.ok) return;
+  const state = await resp.json();
+  render(state);
+  prevState = state;
+  $('statusLine').textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
+}
+
+function diffIds(prevList, newList) {
+  const prevById = new Map((prevList || []).map(r => [r.id, JSON.stringify(r)]));
+  const newIds = new Set(), changedIds = new Set();
+  for (const row of newList) {
+    if (!prevById.has(row.id)) newIds.add(row.id);
+    else if (prevById.get(row.id) !== JSON.stringify(row)) changedIds.add(row.id);
+  }
+  return { newIds, changedIds };
+}
+
+function rowClass(id, diff) {
+  if (diff.newIds.has(id)) return 'row-new';
+  if (diff.changedIds.has(id)) return 'row-changed';
+  return '';
+}
+
+function render(state) {
+  renderBusinessCard(state.business);
+  renderTable('contactsTable', state.contacts, prevState?.contacts,
+    ['id','name','email','phone','status'], ['extension_data']);
+  renderTable('followUpsTable', state.follow_ups, prevState?.follow_ups,
+    ['id','contact_id','type','status','due_date','notes'], ['extension_data']);
+  renderTable('eventsTable', state.events, prevState?.events,
+    ['id','contact_id','source','processed','received_at','raw_content'], ['parsed_data']);
+  renderDraftedActionsTable(state.drafted_actions, prevState?.drafted_actions);
+  renderTable('approvalPoliciesTable', state.approval_policies, prevState?.approval_policies,
+    ['id','action_type','auto_approve'], []);
+}
+
+function renderBusinessCard(business) {
+  const el = $('businessCard');
+  const changed = prevState && JSON.stringify(prevState.business) !== JSON.stringify(business);
+  el.className = changed ? 'row-changed' : '';
+  el.innerHTML = `
+    <table>
+      <tr><th class="core">id</th><td class="core">${business.id}</td>
+          <th class="core">name</th><td class="core">${business.name}</td></tr>
+      <tr><th class="core">industry_pack</th><td class="core">${business.industry_pack}</td>
+          <th class="core">pack_version</th><td class="core">${business.pack_version}</td></tr>
+      <tr><th class="config">settings_json</th>
+          <td class="config" colspan="3"><code class="kv">${JSON.stringify(business.settings_json, null, 2)}</code></td></tr>
+    </table>`;
+}
+
+function renderTable(containerId, rows, prevRows, coreCols, configCols) {
+  const container = $(containerId);
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">None yet.</div>';
+    return;
+  }
+  const diff = diffIds(prevRows, rows);
+  let html = '<table><thead><tr>';
+  for (const c of coreCols) html += `<th class="core">${c}</th>`;
+  for (const c of configCols) html += `<th class="config">${c}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += `<tr class="${rowClass(row.id, diff)}">`;
+    for (const c of coreCols) html += `<td class="core">${formatCell(row[c])}</td>`;
+    for (const c of configCols) html += `<td class="config"><code class="kv">${JSON.stringify(row[c] ?? {}, null, 2)}</code></td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function formatCell(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  return String(v);
+}
+
+// ---------- drafted actions (approve/reject) ----------
+
+function renderDraftedActionsTable(rows, prevRows) {
+  const container = $('draftedActionsTable');
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">None yet.</div>';
+    return;
+  }
+  const coreCols = ['id','event_id','contact_id','action_type','status'];
+  const diff = diffIds(prevRows, rows);
+  let html = '<table><thead><tr>';
+  for (const c of coreCols) html += `<th class="core">${c}</th>`;
+  html += '<th class="config">payload</th><th class="core">actions</th>';
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += `<tr class="${rowClass(row.id, diff)}">`;
+    for (const c of coreCols) html += `<td class="core">${formatCell(row[c])}</td>`;
+    html += `<td class="config"><code class="kv">${JSON.stringify(row.payload ?? {}, null, 2)}</code></td>`;
+    if (row.status === 'pending_approval') {
+      html += `<td class="core">
+        <button class="secondary" onclick="approveAction(${row.id})">Approve</button>
+        <button class="secondary" onclick="rejectAction(${row.id})">Reject</button>
+      </td>`;
+    } else {
+      html += '<td class="core"></td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function approveAction(actionId) {
+  await fetch(`/drafted-actions/${actionId}/approve`, { method: 'POST' });
+  fetchState();
+}
+
+async function rejectAction(actionId) {
+  await fetch(`/drafted-actions/${actionId}/reject`, { method: 'POST' });
+  fetchState();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+defaults:
+  send_trial_info: false
+  schedule_tour: false
+  escalate_to_manager: true
