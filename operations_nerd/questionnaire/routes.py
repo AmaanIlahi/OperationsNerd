@@ -15,7 +15,7 @@ estate, or any other vertical.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from packs.loader import load_pack, PackLoadError
+from packs.loader import load_pack, list_packs, PackLoadError
 from questionnaire.validation import validate_answers, answers_to_settings
 from db import db as d
 
@@ -37,6 +37,11 @@ def _load_pack_or_404(pack_id: str):
         # doesn't exist / isn't usable." Full detail still goes in the body
         # for debugging.
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/packs")
+def get_packs():
+    return list_packs()
 
 
 @router.get("/packs/{pack_id}/questionnaire")

@@ -119,6 +119,23 @@ def load_pack(pack_id: str, packs_dir: str = None) -> Pack:
     return pack
 
 
+def list_packs(packs_dir: str = None) -> list[dict]:
+    """Scans packs/ for subfolders with a pack.yaml and returns their id +
+    display_name, so callers (the frontend's pack picker) never have to
+    hardcode which packs exist."""
+    if packs_dir is None:
+        packs_dir = os.path.join(os.path.dirname(__file__))
+
+    packs = []
+    for entry in sorted(os.listdir(packs_dir)):
+        pack_dir = os.path.join(packs_dir, entry)
+        pack_yaml = os.path.join(pack_dir, "pack.yaml")
+        if os.path.isdir(pack_dir) and os.path.isfile(pack_yaml):
+            meta = _read_yaml(pack_yaml)
+            packs.append({"id": meta.get("id", entry), "display_name": meta.get("display_name", entry)})
+    return packs
+
+
 # ---------- cross-file validation ----------
 
 _SETTINGS_REF = re.compile(r"\{\{\s*settings\.(\w+)\s*\}\}")

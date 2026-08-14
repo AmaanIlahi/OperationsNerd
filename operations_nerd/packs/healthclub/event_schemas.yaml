@@ -1,0 +1,7 @@
+schemas:
+  - event_type: inbound_email
+    extract_fields: [intent, membership_type_ref, urgency]
+    valid_action_types:
+      - send_trial_info
+      - schedule_tour
+      - escalate_to_manager

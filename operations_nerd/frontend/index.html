@@ -86,7 +86,7 @@
 <section id="setup">
   <h2>Setup Questionnaire</h2>
   <label>Config Pack id</label>
-  <input type="text" id="packId" value="realestate">
+  <select id="packId"></select>
   <label>Business name</label>
   <input type="text" id="businessName" placeholder="e.g. Riverbend Realty">
 
@@ -131,6 +131,18 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- questionnaire ----------
 
+async function loadPackOptions() {
+  const select = $('packId');
+  try {
+    const resp = await fetch('/packs');
+    const packs = await resp.json();
+    select.innerHTML = packs.map(p => `<option value="${p.id}">${p.display_name}</option>`).join('');
+  } catch (e) {
+    $('formErrors').textContent = `Error loading packs: ${e}`;
+  }
+}
+loadPackOptions();
+
 $('loadPackBtn').addEventListener('click', async () => {
   const packId = $('packId').value.trim();
   $('formErrors').innerHTML = '';
@@ -173,6 +185,12 @@ function renderQuestions(questions) {
         row.appendChild(cbLabel);
       }
       container.appendChild(row);
+    } else if (q.type === 'boolean') {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.qid = q.id;
+      cb.className = 'q-boolean';
+      container.appendChild(cb);
     } else {
       const input = document.createElement('input');
       input.type = q.type === 'number' ? 'number' : 'text';
@@ -197,6 +215,10 @@ function collectAnswers() {
     (multiGroups[qid] ||= []).push(el.value);
   });
   Object.assign(answers, multiGroups);
+  document.querySelectorAll('.q-boolean').forEach(el => {
+    const qid = el.dataset.qid;
+    answers[qid] = el.checked;
+  });
   return answers;
 }
 
