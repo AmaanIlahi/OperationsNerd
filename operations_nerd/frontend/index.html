@@ -95,6 +95,10 @@
   <div class="errors" id="formErrors"></div>
   <button id="loadPackBtn">Load questionnaire</button>
   <button id="submitBtn" class="secondary" disabled>Create business</button>
+
+  <label style="margin-top:20px;">View existing business</label>
+  <input type="number" id="viewBusinessId" placeholder="Business ID">
+  <button id="viewBusinessBtn" class="secondary">View business</button>
 </section>
 
 <section id="stateSection" style="display:none;">
@@ -258,6 +262,24 @@ $('pauseBtn').addEventListener('click', () => {
 });
 $('refreshBtn').addEventListener('click', fetchState);
 
+$('viewBusinessBtn').addEventListener('click', async () => {
+  $('formErrors').innerHTML = '';
+  const id = $('viewBusinessId').value.trim();
+  if (!id) { $('formErrors').textContent = 'Enter a business ID.'; return; }
+
+  const resp = await fetch(`/businesses/${id}/state`);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    $('formErrors').textContent = `Could not load business ${id}: ${body.detail || resp.statusText}`;
+    return;
+  }
+
+  businessId = id;
+  prevState = null;
+  $('stateSection').style.display = 'block';
+  startPolling();
+});
+
 function startPolling() {
   fetchState();
   if (pollTimer) clearInterval(pollTimer);
@@ -267,7 +289,11 @@ function startPolling() {
 async function fetchState() {
   if (!businessId) return;
   const resp = await fetch(`/businesses/${businessId}/state`);
-  if (!resp.ok) return;
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    $('formErrors').textContent = `Could not load business ${businessId}: ${body.detail || resp.statusText}`;
+    return;
+  }
   const state = await resp.json();
   render(state);
   prevState = state;
