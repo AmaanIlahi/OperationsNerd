@@ -7,4 +7,5 @@ templates:
 
   send_trial_info: |
     Write a short, friendly reply letting the prospect know about the {{settings.free_trial_days}}-day free trial.
-    Mention membership options if relevant. Keep it under 4 sentences.
+    They're interested in {{event.parsed_data.membership_type_ref}} membership specifically, so address that directly.
+    Mention other membership options briefly. Keep it under 4 sentences.
