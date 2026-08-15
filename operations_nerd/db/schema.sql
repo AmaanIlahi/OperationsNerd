@@ -1,7 +1,10 @@
 -- Operations Nerd core schema
 -- These tables are fixed and vertical-agnostic. No Config Pack ever adds a table
 -- or a new foreign key relationship here. Vertical-specific fields live in the
--- extension_data JSON column on the relevant table.
+-- entity_attributes EAV table below, keyed by (entity_type, entity_id, attribute_name).
+-- Callers work with plain dicts and never touch EAV rows directly -- the
+-- set_entity_attributes / get_entity_attributes helpers in db.py merge attrs
+-- in and out of the contact / follow_up dicts.
 --
 -- Falsifiability note: if building a vertical ever requires a new table or a new
 -- relationship (not just a new field), that is a true break in the core thesis,

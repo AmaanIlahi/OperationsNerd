@@ -133,6 +133,39 @@ let paused = false;
 
 const $ = (id) => document.getElementById(id);
 
+// Safe DOM builder. `text` and `attrs` always go through textContent /
+// setAttribute, so strings controlled by pack authors, business owners,
+// or LLM output are rendered as literal text -- not parsed as HTML.
+function el(tag, opts = {}) {
+  const node = document.createElement(tag);
+  if (opts.className) node.className = opts.className;
+  if (opts.text != null) node.textContent = String(opts.text);
+  if (opts.attrs) {
+    for (const [k, v] of Object.entries(opts.attrs)) {
+      if (v == null) continue;
+      node.setAttribute(k, String(v));
+    }
+  }
+  if (opts.on) {
+    for (const [evt, fn] of Object.entries(opts.on)) {
+      node.addEventListener(evt, fn);
+    }
+  }
+  if (opts.children) {
+    for (const c of opts.children) {
+      if (c == null) continue;
+      node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+  }
+  return node;
+}
+
+// Clears a container and replaces its children in one call.
+function setChildren(container, children) {
+  container.replaceChildren();
+  for (const c of children) container.appendChild(c);
+}
+
 // ---------- questionnaire ----------
 
 async function loadPackOptions() {
@@ -140,7 +173,11 @@ async function loadPackOptions() {
   try {
     const resp = await fetch('/packs');
     const packs = await resp.json();
-    select.innerHTML = packs.map(p => `<option value="${p.id}">${p.display_name}</option>`).join('');
+    // Build option nodes (not string concatenation) so pack-controlled
+    // display_name can't be parsed as HTML.
+    setChildren(select, packs.map(p =>
+      el('option', { attrs: { value: p.id }, text: p.display_name })
+    ));
   } catch (e) {
     $('formErrors').textContent = `Error loading packs: ${e}`;
   }
@@ -149,7 +186,7 @@ loadPackOptions();
 
 $('loadPackBtn').addEventListener('click', async () => {
   const packId = $('packId').value.trim();
-  $('formErrors').innerHTML = '';
+  $('formErrors').replaceChildren();
   try {
     const resp = await fetch(`/packs/${packId}/questionnaire`);
     if (!resp.ok) {
@@ -168,7 +205,7 @@ $('loadPackBtn').addEventListener('click', async () => {
 
 function renderQuestions(questions) {
   const container = $('questionsContainer');
-  container.innerHTML = '';
+  container.replaceChildren();
   for (const q of questions) {
     const label = document.createElement('label');
     label.textContent = q.label;
@@ -227,7 +264,7 @@ function collectAnswers() {
 }
 
 $('submitBtn').addEventListener('click', async () => {
-  $('formErrors').innerHTML = '';
+  $('formErrors').replaceChildren();
   const name = $('businessName').value.trim();
   const packId = $('packId').value.trim();
   if (!name) { $('formErrors').textContent = 'Business name is required.'; return; }
@@ -241,9 +278,14 @@ $('submitBtn').addEventListener('click', async () => {
     });
     const body = await resp.json();
     if (!resp.ok) {
-      const issues = body.detail?.issues || [body.detail];
-      $('formErrors').innerHTML = '<strong>Could not create business:</strong><ul>' +
-        issues.map(i => `<li>${i}</li>`).join('') + '</ul>';
+      // Build the error block with DOM nodes so server-supplied strings
+      // (validation issues, error detail) are rendered as text, not HTML.
+      const issues = body.detail?.issues || [String(body.detail)];
+      const errList = el('ul', { children: issues.map(i => el('li', { text: String(i) })) });
+      setChildren($('formErrors'), [
+        el('strong', { text: 'Could not create business:' }),
+        errList,
+      ]);
       return;
     }
     businessId = body.business_id;
@@ -330,39 +372,56 @@ function render(state) {
 }
 
 function renderBusinessCard(business) {
-  const el = $('businessCard');
+  const container = $('businessCard');
   const changed = prevState && JSON.stringify(prevState.business) !== JSON.stringify(business);
-  el.className = changed ? 'row-changed' : '';
-  el.innerHTML = `
-    <table>
-      <tr><th class="core">id</th><td class="core">${business.id}</td>
-          <th class="core">name</th><td class="core">${business.name}</td></tr>
-      <tr><th class="core">industry_pack</th><td class="core">${business.industry_pack}</td>
-          <th class="core">pack_version</th><td class="core">${business.pack_version}</td></tr>
-      <tr><th class="config">settings_json</th>
-          <td class="config" colspan="3"><code class="kv">${JSON.stringify(business.settings_json, null, 2)}</code></td></tr>
-    </table>`;
+  container.className = changed ? 'row-changed' : '';
+
+  const cell = (cls, text) => el('td', { className: cls, text });
+  const header = (cls, text) => el('th', { className: cls, text });
+
+  const table = el('table', { children: [
+    el('tr', { children: [
+      header('core', 'id'), cell('core', business.id),
+      header('core', 'name'), cell('core', business.name),
+    ]}),
+    el('tr', { children: [
+      header('core', 'industry_pack'), cell('core', business.industry_pack),
+      header('core', 'pack_version'), cell('core', business.pack_version),
+    ]}),
+    el('tr', { children: [
+      header('config', 'settings_json'),
+      el('td', { className: 'config', attrs: { colspan: '3' }, children: [
+        el('code', { className: 'kv', text: JSON.stringify(business.settings_json ?? {}, null, 2) }),
+      ]}),
+    ]}),
+  ]});
+
+  setChildren(container, [table]);
 }
 
 function renderTable(containerId, rows, prevRows, coreCols, configCols) {
   const container = $(containerId);
   if (!rows || rows.length === 0) {
-    container.innerHTML = '<div class="empty-note">None yet.</div>';
+    setChildren(container, [el('div', { className: 'empty-note', text: 'None yet.' })]);
     return;
   }
   const diff = diffIds(prevRows, rows);
-  let html = '<table><thead><tr>';
-  for (const c of coreCols) html += `<th class="core">${c}</th>`;
-  for (const c of configCols) html += `<th class="config">${c}</th>`;
-  html += '</tr></thead><tbody>';
-  for (const row of rows) {
-    html += `<tr class="${rowClass(row.id, diff)}">`;
-    for (const c of coreCols) html += `<td class="core">${formatCell(row[c])}</td>`;
-    for (const c of configCols) html += `<td class="config"><code class="kv">${JSON.stringify(row[c] ?? {}, null, 2)}</code></td>`;
-    html += '</tr>';
-  }
-  html += '</tbody></table>';
-  container.innerHTML = html;
+
+  const headerRow = el('tr', { children: [
+    ...coreCols.map(c => el('th', { className: 'core', text: c })),
+    ...configCols.map(c => el('th', { className: 'config', text: c })),
+  ]});
+  const thead = el('thead', { children: [headerRow] });
+
+  const tbody = el('tbody', { children: rows.map(row => {
+    const coreCells = coreCols.map(c => el('td', { className: 'core', text: formatCell(row[c]) }));
+    const configCells = configCols.map(c => el('td', { className: 'config', children: [
+      el('code', { className: 'kv', text: JSON.stringify(row[c] ?? {}, null, 2) }),
+    ]}));
+    return el('tr', { className: rowClass(row.id, diff), children: [...coreCells, ...configCells] });
+  })});
+
+  setChildren(container, [el('table', { children: [thead, tbody] })]);
 }
 
 function formatCell(v) {
@@ -376,31 +435,39 @@ function formatCell(v) {
 function renderDraftedActionsTable(rows, prevRows) {
   const container = $('draftedActionsTable');
   if (!rows || rows.length === 0) {
-    container.innerHTML = '<div class="empty-note">None yet.</div>';
+    setChildren(container, [el('div', { className: 'empty-note', text: 'None yet.' })]);
     return;
   }
   const coreCols = ['id','event_id','contact_id','action_type','status'];
   const diff = diffIds(prevRows, rows);
-  let html = '<table><thead><tr>';
-  for (const c of coreCols) html += `<th class="core">${c}</th>`;
-  html += '<th class="config">payload</th><th class="core">actions</th>';
-  html += '</tr></thead><tbody>';
-  for (const row of rows) {
-    html += `<tr class="${rowClass(row.id, diff)}">`;
-    for (const c of coreCols) html += `<td class="core">${formatCell(row[c])}</td>`;
-    html += `<td class="config"><code class="kv">${JSON.stringify(row.payload ?? {}, null, 2)}</code></td>`;
+
+  const headerRow = el('tr', { children: [
+    ...coreCols.map(c => el('th', { className: 'core', text: c })),
+    el('th', { className: 'config', text: 'payload' }),
+    el('th', { className: 'core', text: 'actions' }),
+  ]});
+  const thead = el('thead', { children: [headerRow] });
+
+  const tbody = el('tbody', { children: rows.map(row => {
+    const coreCells = coreCols.map(c => el('td', { className: 'core', text: formatCell(row[c]) }));
+    const payloadCell = el('td', { className: 'config', children: [
+      el('code', { className: 'kv', text: JSON.stringify(row.payload ?? {}, null, 2) }),
+    ]});
+    const actionsCell = el('td', { className: 'core' });
     if (row.status === 'pending_approval') {
-      html += `<td class="core">
-        <button class="secondary" onclick="approveAction(${row.id})">Approve</button>
-        <button class="secondary" onclick="rejectAction(${row.id})">Reject</button>
-      </td>`;
-    } else {
-      html += '<td class="core"></td>';
+      actionsCell.appendChild(el('button', {
+        className: 'secondary', text: 'Approve',
+        on: { click: () => approveAction(row.id) },
+      }));
+      actionsCell.appendChild(el('button', {
+        className: 'secondary', text: 'Reject',
+        on: { click: () => rejectAction(row.id) },
+      }));
     }
-    html += '</tr>';
-  }
-  html += '</tbody></table>';
-  container.innerHTML = html;
+    return el('tr', { className: rowClass(row.id, diff), children: [...coreCells, payloadCell, actionsCell] });
+  })});
+
+  setChildren(container, [el('table', { children: [thead, tbody] })]);
 }
 
 async function approveAction(actionId) {
