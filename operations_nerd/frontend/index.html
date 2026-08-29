@@ -305,7 +305,7 @@ $('pauseBtn').addEventListener('click', () => {
 $('refreshBtn').addEventListener('click', fetchState);
 
 $('viewBusinessBtn').addEventListener('click', async () => {
-  $('formErrors').innerHTML = '';
+  $('formErrors').replaceChildren();
   const id = $('viewBusinessId').value.trim();
   if (!id) { $('formErrors').textContent = 'Enter a business ID.'; return; }
 
