@@ -8,7 +8,12 @@ list. Either path funnels through the same _simulated_send, so approved
 and auto-approved actions can never diverge in what "sending" means.
 """
 
+import logging
+
 from db import db as d
+
+
+_log = logging.getLogger(__name__)
 
 
 class ApprovalError(Exception):
@@ -16,8 +21,12 @@ class ApprovalError(Exception):
 
 
 def _simulated_send(action: dict):
-    """Dummy send for this POC. No real delivery, this is confirmed scope."""
-    print(f"[SIMULATED SEND] action_id={action['id']} action_type={action['action_type']} payload={action['payload']}")
+    """Dummy send for this POC. No real delivery, this is confirmed scope.
+    Logs at INFO so sends are visible in uvicorn's structured logs."""
+    _log.info(
+        "simulated_send action_id=%s action_type=%s payload=%s",
+        action["id"], action["action_type"], action["payload"],
+    )
 
 
 def approve_and_send(conn, action_id: int) -> dict:
@@ -29,7 +38,7 @@ def approve_and_send(conn, action_id: int) -> dict:
             f"Drafted action {action_id} is not pending approval (current status: {action['status']})"
         )
 
-    d.set_action_status(conn, action_id, "approved")
+    d.set_action_status(conn, action_id, "approved", decided_at=True)
     action["status"] = "approved"
     _simulated_send(action)
     d.set_action_status(conn, action_id, "sent")
@@ -46,7 +55,8 @@ def reject_action(conn, action_id: int) -> dict:
             f"Drafted action {action_id} is not pending approval (current status: {action['status']})"
         )
 
-    d.set_action_status(conn, action_id, "rejected")
+    # Human decision: mark the moment a person said no.
+    d.set_action_status(conn, action_id, "rejected", decided_at=True)
 
     return d.get_drafted_action(conn, action_id)
 
@@ -56,9 +66,12 @@ def maybe_auto_approve(conn, action_id: int) -> dict | None:
     if not d.is_auto_approved(conn, action["business_id"], action["action_type"]):
         return None
 
-    d.set_action_status(conn, action_id, "auto_approved")
+    # Auto-approval is policy-driven, not a human decision: decided_at stays
+    # NULL. created_at + the status value reconstruct the timeline without
+    # conflating auto-approval with a human "yes".
+    d.set_action_status(conn, action_id, "auto_approved", decided_at=False)
     action["status"] = "auto_approved"
     _simulated_send(action)
-    d.set_action_status(conn, action_id, "sent")
+    d.set_action_status(conn, action_id, "sent", decided_at=False)
 
     return d.get_drafted_action(conn, action_id)

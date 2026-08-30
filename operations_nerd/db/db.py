@@ -35,6 +35,13 @@ def get_conn(db_path: str = DB_PATH):
     try:
         yield conn
         conn.commit()
+    except Exception:
+        # Any exception inside the with-block rolls back the whole transaction
+        # so callers (notably the event pipeline's extract -> draft -> save ->
+        # maybe_auto_approve sequence) get atomicity for free: either every
+        # write lands or none of them do.
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -127,11 +134,37 @@ def get_contact(conn, contact_id: int) -> dict | None:
 
 
 def list_contacts(conn, business_id: int) -> list[dict]:
-    rows = conn.execute("SELECT * FROM contacts WHERE business_id = ? ORDER BY created_at DESC", (business_id,)).fetchall()
+    # One round-trip: aggregate EAV attributes into a JSON object per contact
+    # via json_group_object, then LEFT JOIN it onto the contacts query. This
+    # was previously N+1 (one query for the contact list, then one query per
+    # contact for its attributes) -- the state endpoint called it on every
+    # poll, so the multiplier was 3 + 3N round-trips for the full state view.
+    rows = conn.execute(
+        """SELECT c.*,
+                  COALESCE(e.attrs_json, '{}') AS extension_data_json
+           FROM contacts c
+           LEFT JOIN (
+               SELECT entity_id,
+                      json_group_object(attribute_name, value) AS attrs_json
+               FROM entity_attributes
+               WHERE entity_type = 'contact'
+               GROUP BY entity_id
+           ) e ON e.entity_id = c.id
+           WHERE c.business_id = ?
+           ORDER BY c.created_at DESC""",
+        (business_id,),
+    ).fetchall()
     contacts = []
     for r in rows:
         c = dict(r)
-        c["extension_data"] = get_entity_attributes(conn, "contact", c["id"])
+        # EAV values are stored json-encoded (set_entity_attributes does this
+        # so numbers / bools / lists round-trip). json_group_object preserves
+        # the raw text, so we parse the outer object AND each inner value
+        # to recover the original Python types -- same shape get_entity_attributes
+        # returns when called per-row.
+        c["extension_data"] = {
+            k: json.loads(v) for k, v in json.loads(r["extension_data_json"]).items()
+        }
         contacts.append(c)
     return contacts
 
@@ -152,19 +185,36 @@ def create_follow_up(conn, business_id: int, contact_id: int, type_: str,
 
 
 def list_follow_ups(conn, business_id: int, status: str = None) -> list[dict]:
+    # Same LEFT JOIN + json_group_object pattern as list_contacts --
+    # previously N+1 here too, and the state endpoint called both.
+    where = "WHERE f.business_id = ?"
+    params: list = [business_id]
     if status:
-        rows = conn.execute(
-            "SELECT * FROM follow_ups WHERE business_id = ? AND status = ? ORDER BY due_date",
-            (business_id, status),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM follow_ups WHERE business_id = ? ORDER BY due_date", (business_id,)
-        ).fetchall()
+        where += " AND f.status = ?"
+        params.append(status)
+    rows = conn.execute(
+        f"""SELECT f.*,
+                   COALESCE(e.attrs_json, '{{}}') AS extension_data_json
+            FROM follow_ups f
+            LEFT JOIN (
+                SELECT entity_id,
+                       json_group_object(attribute_name, value) AS attrs_json
+                FROM entity_attributes
+                WHERE entity_type = 'follow_up'
+                GROUP BY entity_id
+            ) e ON e.entity_id = f.id
+            {where}
+            ORDER BY f.due_date""",
+        params,
+    ).fetchall()
     follow_ups = []
     for r in rows:
         f = dict(r)
-        f["extension_data"] = get_entity_attributes(conn, "follow_up", f["id"])
+        # Same double-decode as list_contacts: outer JSON object from
+        # json_group_object, inner json-encoded values from EAV storage.
+        f["extension_data"] = {
+            k: json.loads(v) for k, v in json.loads(r["extension_data_json"]).items()
+        }
         follow_ups.append(f)
     return follow_ups
 
@@ -236,11 +286,20 @@ def list_drafted_actions(conn, business_id: int) -> list[dict]:
     return [_row_to_dict(r, json_fields=("payload",)) for r in rows]
 
 
-def set_action_status(conn, action_id: int, status: str):
-    conn.execute(
-        "UPDATE drafted_actions SET status = ?, decided_at = datetime('now') WHERE id = ?",
-        (status, action_id),
-    )
+def set_action_status(conn, action_id: int, status: str, decided_at: bool = False):
+    # decided_at is set only when a human actually made a decision
+    # (approve_and_send). Auto-approval passes decided_at=False so the column
+    # keeps its semantic: "when did a person decide on this action".
+    if decided_at:
+        conn.execute(
+            "UPDATE drafted_actions SET status = ?, decided_at = datetime('now') WHERE id = ?",
+            (status, action_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE drafted_actions SET status = ? WHERE id = ?",
+            (status, action_id),
+        )
 
 
 # ---------- approval_policies ----------
