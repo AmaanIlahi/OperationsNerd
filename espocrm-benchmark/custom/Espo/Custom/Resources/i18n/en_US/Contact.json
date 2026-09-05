@@ -1,0 +1,13 @@
+{
+    "fields": {
+        "cPreferredContactMethod": "Preferred Contact Method"
+    },
+    "options": {
+        "cPreferredContactMethod": {
+            "Phone": "Phone",
+            "Email": "Email",
+            "SMS": "SMS",
+            "In-Person": "In-Person"
+        }
+    }
+}

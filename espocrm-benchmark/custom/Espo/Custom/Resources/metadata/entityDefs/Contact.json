@@ -1,0 +1,18 @@
+{
+    "fields": {
+        "cPreferredContactMethod": {
+            "type": "enum",
+            "required": true,
+            "options": [
+                "Phone",
+                "Email",
+                "SMS",
+                "In-Person"
+            ],
+            "style": {},
+            "default": "Phone",
+            "maxLength": 100,
+            "isCustom": true
+        }
+    }
+}
