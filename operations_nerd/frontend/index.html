@@ -226,6 +226,17 @@ function renderQuestions(questions) {
         row.appendChild(cbLabel);
       }
       container.appendChild(row);
+    } else if (q.type === 'select') {
+      const select = document.createElement('select');
+      select.dataset.qid = q.id;
+      select.className = 'q-select';
+      for (const opt of q.options || []) {
+        const optionEl = document.createElement('option');
+        optionEl.value = opt;
+        optionEl.textContent = opt;
+        select.appendChild(optionEl);
+      }
+      container.appendChild(select);
     } else if (q.type === 'boolean') {
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -256,6 +267,11 @@ function collectAnswers() {
     (multiGroups[qid] ||= []).push(el.value);
   });
   Object.assign(answers, multiGroups);
+  document.querySelectorAll('.q-select').forEach(el => {
+    const qid = el.dataset.qid;
+    if (el.value === '') return;
+    answers[qid] = el.value;
+  });
   document.querySelectorAll('.q-boolean').forEach(el => {
     const qid = el.dataset.qid;
     answers[qid] = el.checked;
