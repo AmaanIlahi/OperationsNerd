@@ -60,6 +60,14 @@ def _validate_one(question: Question, value) -> list[str]:
                     f"allowed values are {sorted(allowed)}"
                 )
 
+    elif question.type == "select":
+        allowed = set(question.options or [])
+        if value not in allowed:
+            issues.append(
+                f"{question.id}: invalid option {value!r}, "
+                f"allowed values are {sorted(allowed)}"
+            )
+
     else:
         issues.append(f"{question.id}: pack declares unknown question type '{question.type}'")
 

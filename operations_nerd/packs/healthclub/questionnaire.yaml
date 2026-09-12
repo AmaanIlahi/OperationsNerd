@@ -19,3 +19,9 @@ questions:
     label: "Do you offer personal training?"
     type: boolean
     settings_key: offers_personal_training
+
+  - id: preferred_language
+    label: "What is your preferred language for communication?"
+    type: select
+    options: ["English", "Spanish", "Other"]
+    settings_key: preferred_language
