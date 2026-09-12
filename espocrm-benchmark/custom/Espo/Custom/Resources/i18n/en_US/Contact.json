@@ -1,6 +1,7 @@
 {
     "fields": {
-        "cPreferredContactMethod": "Preferred Contact Method"
+        "cPreferredContactMethod": "Preferred Contact Method",
+        "cPreferredLanguage": "Preferred Language"
     },
     "options": {
         "cPreferredContactMethod": {
@@ -8,6 +9,11 @@
             "Email": "Email",
             "SMS": "SMS",
             "In-Person": "In-Person"
+        },
+        "cPreferredLanguage": {
+            "English": "English",
+            "Spanish": "Spanish",
+            "Other": "Other"
         }
     }
 }
