@@ -25,3 +25,9 @@ questions:
     type: select
     options: ["English", "Spanish", "Other"]
     settings_key: preferred_language
+
+  - id: referral_source
+    label: "How did you hear about us?"
+    type: select
+    options: ["Referral", "Walk-in", "Online Ad", "Social Media"]
+    settings_key: referral_source
