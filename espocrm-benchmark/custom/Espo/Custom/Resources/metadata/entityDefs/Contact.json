@@ -25,6 +25,19 @@
             "default": "English",
             "maxLength": 100,
             "isCustom": true
+        },
+        "cReferralSource": {
+            "type": "enum",
+            "options": [
+                "",
+                "Referral",
+                "Walk-in",
+                "Online Ad",
+                "Social Media"
+            ],
+            "style": {},
+            "maxLength": 100,
+            "isCustom": true
         }
     }
 }
