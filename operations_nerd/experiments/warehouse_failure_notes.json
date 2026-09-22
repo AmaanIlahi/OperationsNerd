@@ -1,0 +1,105 @@
+{
+  "counts": {
+    "PASS": 4,
+    "DEGRADED": 3,
+    "FAIL": 5
+  },
+  "steps": [
+    {
+      "step": 1,
+      "title": "Partner as a contact with a role attribute",
+      "verdict": "PASS",
+      "tried": "create_contact() for a supplier, then set_entity_attributes(conn, 'contact', id, {'role': 'partner'})",
+      "happened": "contact id=1 created; extension_data={'role': 'partner'}. A supplier is an organisation you deal with, and role is single-valued -- exactly what contacts+EAV are for.",
+      "blocked_by": null
+    },
+    {
+      "step": 2,
+      "title": "Carrier as a contact with a role attribute",
+      "verdict": "PASS",
+      "tried": "create_contact() for a freight carrier, then set_entity_attributes(conn, 'contact', id, {'role': 'carrier'})",
+      "happened": "contact id=2 created; extension_data={'role': 'carrier'}. Same shape as step 1 -- another organisation you deal with.",
+      "blocked_by": null
+    },
+    {
+      "step": 3,
+      "title": "Item as a contact with role='item'",
+      "verdict": "DEGRADED",
+      "tried": "create_contact() for a physical SKU (a bolt), role='item', sku/unit as attributes",
+      "happened": "contact id=3 created and reads back fine: extension_data={'role': 'item', 'sku': 'BOLT-M6', 'unit': 'each'}. But the row also carries email=None, phone=None, status='active' -- fields that exist because contacts means 'someone you deal with'. A bolt inherits a relationship status it cannot have. Mechanically works, but it is the first record that is not a person/org.",
+      "blocked_by": "operations_nerd/db/schema.sql: contacts table (email, phone, status columns baked in) -- modelling smell, not a technical failure"
+    },
+    {
+      "step": 4,
+      "title": "Purchase order header as a contact",
+      "verdict": "DEGRADED",
+      "tried": "create_contact() for the PO header, supplier_id stashed as an entity_attributes value pointing at the supplier's contact id, then overwritten with a nonexistent id (999999)",
+      "happened": "overwrite succeeded silently: extension_data={'role': 'order', 'status': 'open', 'supplier_id': 999999}. supplier_id is a bare integer inside a JSON-encoded TEXT value -- not a foreign key, not enforced, nothing cascades if the referenced contact is deleted.",
+      "blocked_by": "operations_nerd/db/schema.sql: entity_attributes.value is TEXT NOT NULL with no FK and no type"
+    },
+    {
+      "step": 5,
+      "title": "Order lines as follow_ups, qty and price as attributes",
+      "verdict": "PASS",
+      "tried": "create_follow_up() against the order contact, type_='order_line', qty_ordered/unit_price as attributes",
+      "happened": "follow_up id=1, contact_id=4, extension_data={'qty_ordered': 500, 'unit_price': 0.12}. follow_ups already gives a one-to-many (many lines per order) and a single line's quantity and price are single-valued -- exactly what follow_ups+EAV are for. Repeated rows are not the break.",
+      "blocked_by": null
+    },
+    {
+      "step": 6,
+      "title": "Order line also referencing an item (second reference)",
+      "verdict": "FAIL",
+      "tried": "order_line follow_up referencing BOTH its order (via the one real FK, follow_ups.contact_id) AND its item (stashed as an entity_attributes value, since there is no second FK slot), then overwriting item_id with a nonexistent contact id (999999)",
+      "happened": "overwrite succeeded with no error: extension_data={'item_id': 999999, 'qty_ordered': 500, 'unit_price': 0.12}. follow_ups has exactly one FK and the order already owns it -- the item reference degrades to an untyped integer with no integrity, no cascade, no ON DELETE.",
+      "blocked_by": "operations_nerd/db/schema.sql: follow_ups declares a single FK (contact_id REFERENCES contacts(id)); no second FK column exists for a line's item"
+    },
+    {
+      "step": 7,
+      "title": "Workaround: all order lines in one JSON attribute",
+      "verdict": "DEGRADED",
+      "tried": "stuff every order line into a single JSON list stored as one entity_attributes value (lines_blob) on the order contact, then try to query 'which orders contain BOLT-M6'",
+      "happened": "round-trip works: stored list == retrieved list (True). Matching the whole blob works (1 hit(s)), but find_entity_ids_by_attribute compares the whole JSON-encoded string for equality, so a query for just 'BOLT-M6' inside the blob returns 0 hit(s) -- unanswerable. Stored but not queryable, not joinable, not individually updatable.",
+      "blocked_by": "operations_nerd/db/db.py: find_entity_ids_by_attribute does WHERE value = ? against the whole json.dumps()-encoded string"
+    },
+    {
+      "step": 8,
+      "title": "Shipment referencing an order, a partner and a carrier at once",
+      "verdict": "FAIL",
+      "tried": "a shipment follow_up pointing at the order (the one real FK) plus partner and carrier (both stashed as attributes, since no second or third FK slot exists), then overwriting both stashed references with nonexistent contact ids (999999)",
+      "happened": "overwrite succeeded with no error: extension_data={'carrier_id': 999999, 'direction': 'outbound', 'partner_id': 999999}. contacts has one FK (business_id), follow_ups has one FK (contact_id). Three simultaneous references cannot be expressed in a schema offering one.",
+      "blocked_by": "operations_nerd/db/schema.sql: contacts and follow_ups each declare exactly one FK column"
+    },
+    {
+      "step": 9,
+      "title": "Partial receipt (order 500, receive 60 then 440)",
+      "verdict": "FAIL",
+      "tried": "two partial receipts against the same order+item pair, using the order-as-contact_id / item-as-attribute encoding from steps 6 and 8, then corrupting the second receipt's item_id",
+      "happened": "the two receipts sum correctly (total_received=500), but that arithmetic is the only thing that works -- receipt #2's item_id was silently overwritten to a nonexistent contact id with no error: extension_data={'item_id': 999999, 'qty_received': 440}. Partial receipt needs order+item+quantity held together with integrity across multiple rows; it compounds the same untyped-second-reference gap from step 6 rather than introducing a new one.",
+      "blocked_by": "same as step 6: operations_nerd/db/schema.sql, no second FK slot to type-check the item/order pairing"
+    },
+    {
+      "step": 10,
+      "title": "Pack declaring an event with nested line items",
+      "verdict": "FAIL",
+      "tried": "construct an EventSchema for 'purchase order received' whose extract_fields needs to capture nested line items (sku/qty/unit_price per line), not just flat scalar field names",
+      "happened": "rejected before the database is ever involved: pydantic ValidationError on extract_fields -- Input should be a valid string (loc=extract_fields.1). The pipeline cannot parse a purchase order email at all.",
+      "blocked_by": "operations_nerd/packs/loader.py: EventSchema.extract_fields is typed list[str]"
+    },
+    {
+      "step": 11,
+      "title": "Pack declaring a new record type",
+      "verdict": "FAIL",
+      "tried": "construct a Pack carrying a record_types block (item/order/shipment as new nouns), the way the warehouse vertical would need to declare them, alongside the pack's required fields",
+      "happened": "Pack(...) did not raise, but pydantic's default extra='ignore' behaviour silently dropped the field: hasattr(pack, 'record_types') = False. The data the caller passed in simply vanishes; no PackLoadError, no warning. The Pack model has no key for entities, record types or relationships -- a pack can introduce vocabulary (questions, prompts, action types) but not nouns.",
+      "blocked_by": "operations_nerd/packs/loader.py: Pack(BaseModel) declares exactly id/version/display_name/questions/event_schemas/prompts/approval_defaults, nothing for record types"
+    },
+    {
+      "step": 12,
+      "title": "Approval gate wrapping a state change instead of a message",
+      "verdict": "PASS",
+      "tried": "gate a state-changing action (post_inventory_receipt, an inventory update rather than an outbound email) behind the same drafted_actions/approval_policies path used for messages",
+      "happened": "action_type is a free string and payload is free JSON, so post_inventory_receipt sits in drafted_actions exactly like send_follow_up_email would: status='pending_approval', auto_approve gate active=True. The approval layer is not part of the problem.",
+      "blocked_by": null
+    }
+  ]
+}
