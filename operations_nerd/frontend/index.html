@@ -2,134 +2,338 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Operations Nerd — Live State</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operations Nerd</title>
+<script>
+  (function () {
+    var t = localStorage.getItem('opsnerd-theme') || 'system';
+    if (t === 'system') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <style>
-  :root {
-    --core-bg: #f4f4f2;
-    --core-border: #d8d8d4;
-    --config-bg: #fff3d6;
-    --config-border: #e8c568;
-    --new-flash: #bdf5c8;
-    --changed-flash: #fff2a3;
-    --text: #2b2b28;
-  }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #fafaf8;
-    color: var(--text);
-    margin: 0;
-    padding: 24px 32px 64px;
-  }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  .subtitle { color: #706f68; font-size: 13px; margin-bottom: 20px; }
+:root {
+  --font-scale: 1;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
 
-  .legend {
-    display: flex; gap: 18px; align-items: center;
-    font-size: 12px; margin-bottom: 24px; flex-wrap: wrap;
-  }
-  .legend-item { display: flex; align-items: center; gap: 6px; }
-  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #0002; }
+  --page: #F7F7F5; --panel: #FFFFFF; --raised: #F0F0ED;
+  --line: #E4E4E0; --line-strong: #D2D2CC;
+  --text: #1D1D1B; --text-2: #55554F; --text-3: #7A7A73;
+  --accent: #2F5BD3; --accent-text: #FFFFFF;
+  --amber: #9A5B00; --amber-bg: #FFF4DE;
+  --green: #1D7A46; --red: #B42318;
+}
+[data-theme="dark"] {
+  --page: #141413; --panel: #1C1C1A; --raised: #262624;
+  --line: #2F2F2C; --line-strong: #3E3E3A;
+  --text: #EDEDEA; --text-2: #BDBDB6; --text-3: #9C9C94;
+  --accent: #7C9CF0; --accent-text: #0E1630;
+  --amber: #F2B14C; --amber-bg: #33260F;
+  --green: #5BC48A; --red: #F07B70;
+}
 
-  section {
-    background: #fff; border: 1px solid #e6e5e0; border-radius: 10px;
-    padding: 18px 20px; margin-bottom: 20px;
-  }
-  section h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #55544d; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--sans); font-size: calc(15px * var(--font-scale)); line-height: 1.5; font-variant-numeric: tabular-nums; background: var(--page); color: var(--text); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
+a { color: var(--accent); }
+[hidden] { display: none !important; }
 
-  label { display: block; font-size: 13px; margin: 10px 0 4px; font-weight: 600; }
-  input[type=text], input[type=number] {
-    width: 100%; max-width: 360px; padding: 7px 9px; border: 1px solid #ccc;
-    border-radius: 6px; font-size: 13px; box-sizing: border-box;
-  }
-  .checkbox-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
-  .checkbox-row label { display: flex; align-items: center; gap: 5px; font-weight: 400; margin: 0; }
+/* ---------- shell ---------- */
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.nav { border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 0; height: 100vh; background: var(--page); }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; font-weight: 600; font-size: calc(15px * var(--font-scale)); }
+.brand svg { width: 22px; height: 22px; }
+[data-theme="dark"] .brand rect { fill: #EDEDEA; }
+[data-theme="dark"] .brand path { stroke: #141413; }
+.switcher { position: relative; }
+.switcher-btn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; text-align: left; min-height: 44px; }
+.switcher-btn:hover { border-color: var(--line-strong); }
+.switcher-btn .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switcher-btn .sub { display: block; font-size: calc(13px * var(--font-scale)); color: var(--text-3); }
+.switcher-btn svg { width: 16px; height: 16px; color: var(--text-3); }
+.menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.12); z-index: 30; padding: 6px; }
+.menu input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--page); margin-bottom: 4px; }
+.menu-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: var(--radius); cursor: pointer; min-height: 40px; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--raised); outline: none; }
+.menu-item .sub { color: var(--text-3); font-size: calc(13px * var(--font-scale)); }
+.menu hr { border: none; border-top: 1px solid var(--line); margin: 6px 0; }
+.menu .open-id { display: flex; gap: 6px; padding: 4px; }
+.menu .open-id input { margin: 0; }
 
-  button {
-    margin-top: 16px; padding: 8px 16px; border: none; border-radius: 6px;
-    background: #2b2b28; color: #fff; font-size: 13px; cursor: pointer;
-  }
-  button.secondary { background: #eceae3; color: #2b2b28; margin-left: 8px; }
-  button:disabled { opacity: 0.5; cursor: default; }
+.nav-links { display: flex; flex-direction: column; gap: 2px; }
+.nav-link { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius); border: none; background: none; cursor: pointer; color: var(--text-2); text-align: left; min-height: 40px; }
+.nav-link svg { width: 18px; height: 18px; }
+.nav-link:hover { background: var(--raised); color: var(--text); }
+.nav-link { position: relative; }
+.nav-link.active { background: var(--raised); color: var(--text); font-weight: 600; }
+.nav-link.active::before { content: ''; position: absolute; left: -14px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--text); }
+.nav-link .badge { margin-left: auto; font-size: calc(12px * var(--font-scale)); font-weight: 600; color: var(--amber); min-width: 20px; text-align: right; }
+.sync { margin-top: auto; padding: 0 6px; font-size: calc(13px * var(--font-scale)); color: var(--text-3); display: flex; align-items: center; gap: 8px; }
+.sync button { border: none; background: none; color: var(--text-2); cursor: pointer; padding: 4px 0; text-decoration: underline; text-underline-offset: 2px; }
 
-  .errors { color: #b3261e; font-size: 13px; margin-top: 10px; }
-  .errors ul { margin: 4px 0 0; padding-left: 18px; }
+.main { min-width: 0; padding: 40px 48px 72px; max-width: 920px; }
+.view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.view-head h1 { font-size: calc(26px * var(--font-scale)); line-height: 1.2; }
+.lede { color: var(--text-2); margin: 0 0 24px; }
+.summary { display: flex; flex-wrap: wrap; gap: 4px 0; color: var(--text-2); margin: 4px 0 32px; }
+.summary > * { white-space: nowrap; }
+.summary > * + *::before { content: '\00B7'; margin: 0 10px; color: var(--text-3); }
+.summary .attn { color: var(--amber); font-weight: 600; }
+.summary button { border: none; background: none; padding: 0; color: inherit; cursor: pointer; }
+.summary button:hover { color: var(--text); text-decoration: underline; }
+.section-title { font-size: calc(15px * var(--font-scale)); font-weight: 600; margin: 40px 0 4px; }
+.section-sub { color: var(--text-3); font-size: calc(14px * var(--font-scale)); margin: 0 0 12px; }
+.section-title + :not(.section-sub) { margin-top: 12px; }
+.muted { color: var(--text-3); }
+.small { font-size: calc(13px * var(--font-scale)); }
 
-  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12.5px; }
-  th, td { text-align: left; padding: 6px 8px; border: 1px solid var(--core-border); vertical-align: top; }
-  th { background: #f0efeb; font-weight: 600; }
-  td.core, th.core { background: var(--core-bg); }
-  td.config, th.config { background: var(--config-bg); border-color: var(--config-border); }
-  .empty-note { color: #918f86; font-size: 12.5px; font-style: italic; }
+/* ---------- buttons ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--panel); cursor: pointer; font-weight: 500; }
+.btn:hover { background: var(--raised); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; padding: 8px 18px; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.quiet { border-color: transparent; background: none; color: var(--text-2); }
+.btn.quiet:hover { background: var(--raised); color: var(--text); }
+.btn:focus-visible, .nav-link:focus-visible, .switcher-btn:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  code.kv { display: block; white-space: pre-wrap; font-size: 12px; }
+/* ---------- review item (the one real card) ---------- */
+.review { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 24px 28px 20px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 2px 8px rgba(0,0,0,.03); }
+[data-theme="dark"] .review { box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.review-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.review-head .when { color: var(--text-3); font-size: calc(13px * var(--font-scale)); white-space: nowrap; }
+.review .eyebrow { display: flex; align-items: center; gap: 7px; font-size: calc(12.5px * var(--font-scale)); font-weight: 600; color: var(--amber); margin-bottom: 8px; }
+.review .eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); flex: none; }
+.review h2 { font-size: calc(19px * var(--font-scale)); line-height: 1.3; }
+.review .meta { color: var(--text-2); font-size: calc(14px * var(--font-scale)); margin-top: 2px; }
+.review .block { margin-top: 20px; }
+.review .label { font-size: calc(13px * var(--font-scale)); font-weight: 500; color: var(--text-3); margin-bottom: 6px; }
+.quote { margin: 0; padding-left: 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); white-space: pre-wrap; }
+.draft { white-space: pre-wrap; line-height: 1.6; max-width: 64ch; }
+.quote { line-height: 1.55; }
+.why { display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: calc(14px * var(--font-scale)); color: var(--text-2); }
+.why .k { color: var(--text-3); margin-right: 6px; }
+.decide { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.decide .note { color: var(--text-3); font-size: calc(13px * var(--font-scale)); margin-left: auto; }
+.flash { animation: flash 2.2s ease-out; }
+@keyframes flash { from { background-color: var(--amber-bg); } }
+.empty { padding: 36px 0; color: var(--text-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.empty strong { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
 
-  @keyframes flashNew { from { background-color: var(--new-flash); } to { background-color: inherit; } }
-  @keyframes flashChanged { from { background-color: var(--changed-flash); } to { background-color: inherit; } }
-  tr.row-new td { animation: flashNew 2.2s ease-out; animation-fill-mode: none; }
-  tr.row-changed td { animation: flashChanged 2.2s ease-out; animation-fill-mode: none; }
+/* ---------- plain lists ---------- */
+.rows { border-top: 1px solid var(--line); }
+.row { padding: 14px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; }
+.row .title { font-weight: 500; }
+.rows.timeline .row { padding-left: 24px; position: relative; }
+.rows.timeline .row::before { content: ''; position: absolute; left: 3px; top: 21px; width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
+.rows.timeline .row.waiting::before { background: var(--amber); }
+.rows.timeline .row.processing::before { background: none; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.row .desc { color: var(--text-2); grid-column: 1 / -1; overflow-wrap: anywhere; }
+.row .when { color: var(--text-3); font-size: calc(13px * var(--font-scale)); white-space: nowrap; }
+.row .children { grid-column: 1 / -1; margin: 8px 0 0; padding-left: 14px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 4px; color: var(--text-2); font-size: calc(14px * var(--font-scale)); }
+.state { font-size: calc(13px * var(--font-scale)); font-weight: 500; white-space: nowrap; }
+.state.attn { color: var(--amber); }
+.state.ok { color: var(--green); }
+.state.bad { color: var(--red); }
+.state.neutral { color: var(--text-3); }
 
-  #statusLine { font-size: 12px; color: #918f86; margin-top: 4px; }
+details.tech { grid-column: 1 / -1; margin-top: 4px; }
+details.tech > summary { cursor: pointer; color: var(--text-3); font-size: calc(13px * var(--font-scale)); list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 28px; }
+details.tech > summary::-webkit-details-marker { display: none; }
+details.tech > summary::before { content: '\25B8'; font-size: calc(11px * var(--font-scale)); }
+details.tech[open] > summary::before { content: '\25BE'; }
+.code-wrapper { position: relative; margin-top: 6px; }
+.code-block { margin: 0; padding: 10px 12px; background: var(--raised); border-radius: var(--radius); font-family: var(--mono); font-size: calc(12px * var(--font-scale)); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-btn { position: absolute; top: 6px; right: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text-2); border-radius: var(--radius); padding: 2px 8px; font-size: calc(12px * var(--font-scale)); cursor: pointer; }
+
+details.history > summary { cursor: pointer; font-weight: 600; margin: 32px 0 10px; list-style: none; }
+details.history > summary::-webkit-details-marker { display: none; }
+details.history > summary::before { content: '\25B8'; display: inline-block; width: 16px; color: var(--text-3); }
+details.history[open] > summary::before { content: '\25BE'; }
+
+.dl { display: grid; grid-template-columns: 220px minmax(0, 1fr); border-top: 1px solid var(--line); }
+.dl > div { display: contents; }
+.dl dt, .dl dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.dl dt { color: var(--text-2); }
+
+.search { width: 100%; max-width: 360px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); margin-bottom: 12px; }
+.tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tab { border: none; background: none; padding: 10px 0; margin-bottom: -1px; cursor: pointer; color: var(--text-2); border-bottom: 2px solid transparent; min-height: 44px; }
+.tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.seg button { border: none; background: var(--panel); padding: 7px 14px; cursor: pointer; min-height: 36px; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button.on { background: var(--text); color: var(--page); font-weight: 500; }
+
+/* ---------- setup ---------- */
+.setup { max-width: 560px; }
+.field { margin-bottom: 20px; }
+.field > label, #questionsContainer > label { display: block; font-weight: 500; margin-bottom: 6px; }
+#questionsContainer > label { margin-top: 20px; }
+#questionsContainer > label:first-child { margin-top: 0; }
+input[type=text], input[type=number], select { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); }
+.checkbox-row { display: flex; flex-direction: column; gap: 2px; }
+.checkbox-row label { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
+.checkbox-row input, .q-boolean { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+.bool-row { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.errors:empty { display: none; }
+.errors { margin: 0 0 20px; padding: 10px 14px; border-left: 3px solid var(--red); background: var(--panel); color: var(--red); }
+.errors ul { margin: 6px 0 0; padding-left: 18px; }
+.form-actions { display: flex; gap: 10px; align-items: center; margin-top: 28px; }
+
+/* ---------- mobile ---------- */
+.tabbar, .mobile-top { display: none; }
+@media (max-width: 820px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .nav { display: none; }
+  .mobile-top { display: block; position: sticky; top: 0; z-index: 20; background: var(--page); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+  .mobile-top .brand { padding: 0 0 8px; }
+  .main { padding: 24px 16px 96px; }
+  .summary { gap: 2px 16px; }
+  .summary > * + *::before { content: none; }
+  .tabbar { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+  .tabbar button { border: none; background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; min-height: 56px; color: var(--text-3); font-size: calc(12px * var(--font-scale)); cursor: pointer; position: relative; }
+  .tabbar button svg { width: 20px; height: 20px; }
+  .tabbar button { position: relative; }
+  .tabbar button.active { color: var(--text); font-weight: 600; }
+  .tabbar button.active::before { content: ''; position: absolute; top: -1px; left: 30%; right: 30%; height: 2px; background: var(--text); border-radius: 0 0 2px 2px; }
+  .tabbar .badge { position: absolute; top: 6px; left: calc(50% + 8px); background: var(--amber); color: var(--page); border-radius: 9px; min-width: 18px; padding: 0 5px; font-size: calc(11px * var(--font-scale)); font-weight: 600; }
+  .review { padding: 18px 16px 16px; }
+  .review-head { flex-direction: column; gap: 2px; }
+  .why { flex-direction: column; gap: 2px; }
+  .decide .btn { flex: 1; min-height: 44px; }
+  .decide .note { margin-left: 0; width: 100%; }
+  .dl { grid-template-columns: minmax(0, 1fr); }
+  .dl dt { padding-bottom: 0; border-bottom: none; font-size: calc(13px * var(--font-scale)); }
+  .dl dd { padding-top: 2px; }
+  .summary { margin-bottom: 20px; }
+  .view-head h1 { font-size: calc(21px * var(--font-scale)); }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media print {
+  .nav, .tabbar, .mobile-top, .decide, .copy-btn, .sync { display: none !important; }
+  .shell { display: block; }
+  body, .review { background: #FFFFFF !important; }
+  * { color: #1D1D1B !important; }
+}
 </style>
 </head>
 <body>
+<main id="ui-content">
+<div class="shell">
 
-<h1>Operations Nerd — Live State</h1>
-<div class="subtitle">Setup Questionnaire → business creation → live database state. Nothing here is real-estate-specific code, the questions and config fields come entirely from the loaded Config Pack.</div>
+  <nav class="nav" aria-label="Main">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" fill="#1D1D1B"/><path d="M7 15.5l3.2-4 2.6 2.6L17 8.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Operations Nerd
+    </div>
+    <div class="switcher" data-switcher></div>
+    <div class="nav-links" id="navLinks"></div>
+    <div class="sync"><span id="statusLine">Not connected</span><button id="pauseBtn" hidden>Pause</button></div>
+  </nav>
 
-<div class="legend">
-  <div class="legend-item"><span class="swatch" style="background:var(--core-bg);border-color:var(--core-border)"></span> Core engine (same for every industry)</div>
-  <div class="legend-item"><span class="swatch" style="background:var(--config-bg);border-color:var(--config-border)"></span> Config Pack data (industry-specific)</div>
-  <div class="legend-item"><span class="swatch" style="background:var(--new-flash)"></span> Just created</div>
-  <div class="legend-item"><span class="swatch" style="background:var(--changed-flash)"></span> Just changed</div>
+  <div class="mobile-top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" fill="#1D1D1B"/><path d="M7 15.5l3.2-4 2.6 2.6L17 8.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Operations Nerd
+    </div>
+    <div class="switcher" data-switcher></div>
+  </div>
+
+  <div class="main">
+
+    <!-- Queue: the main workspace -->
+    <section id="view-queue" data-view="queue" hidden>
+      <div class="view-head"><h1>Needs review</h1></div>
+      <p class="summary" id="summaryLine"></p>
+      <div id="draftedActionsTable"></div>
+    </section>
+
+    <!-- Activity -->
+    <section id="view-activity" data-view="activity" hidden>
+      <div class="view-head"><h1>Activity</h1></div>
+      <p class="lede">Incoming messages and what happened with each one, newest first.</p>
+      <div id="eventsTable"></div>
+    </section>
+
+    <!-- Records -->
+    <section id="view-records" data-view="records" hidden>
+      <div class="view-head"><h1>Contacts</h1></div>
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="contacts" role="tab">People</button>
+        <button class="tab" data-tab="followups" role="tab">Follow-ups</button>
+      </div>
+      <div data-tabpanel="contacts">
+        <input type="search" class="search" id="contactSearch" placeholder="Search by name, email or phone" aria-label="Search contacts">
+        <div id="contactsTable"></div>
+      </div>
+      <div data-tabpanel="followups" hidden>
+        <div id="followUpsTable"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="view-settings" data-view="settings" hidden>
+      <div class="view-head"><h1>Settings</h1></div>
+      <h2 class="section-title">Business profile</h2>
+      <p class="section-sub">What the assistant knows about this business when it drafts replies.</p>
+      <div id="businessCard"></div>
+      <h2 class="section-title">Automation</h2>
+      <p class="section-sub">Which drafted actions go out on their own, and which wait for someone to approve them.</p>
+      <div id="approvalPoliciesTable"></div>
+      <h2 class="section-title">Appearance</h2>
+      <p class="section-sub">Saved on this device.</p>
+      <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+        <button data-theme-opt="system">System</button><button data-theme-opt="light">Light</button><button data-theme-opt="dark">Dark</button>
+      </div>
+      <h2 class="section-title">Technical details</h2>
+      <div id="techDetails"></div>
+    </section>
+
+    <!-- Setup (onboarding) -->
+    <section id="view-setup" data-view="setup" hidden>
+      <div class="setup">
+        <div class="view-head"><h1>Set up a business</h1></div>
+        <p class="lede">Pick the kind of business and answer a few questions. The questions come from that industry's template.</p>
+        <div class="field">
+          <label for="packId">Industry</label>
+          <select id="packId"></select>
+        </div>
+        <div class="field">
+          <label for="businessName">Business name</label>
+          <input type="text" id="businessName" placeholder="e.g. Riverbend Realty" autocomplete="off">
+        </div>
+        <div id="questionsContainer"></div>
+        <div class="form-actions">
+          <button class="btn primary" id="submitBtn" disabled>Create business</button>
+          <button class="btn quiet" id="cancelSetupBtn" hidden>Cancel</button>
+        </div>
+        <div class="errors" id="formErrors" role="alert" style="margin-top:20px"></div>
+      </div>
+    </section>
+
+  </div>
 </div>
 
-<section id="setup">
-  <h2>Setup Questionnaire</h2>
-  <label>Config Pack id</label>
-  <select id="packId"></select>
-  <label>Business name</label>
-  <input type="text" id="businessName" placeholder="e.g. Riverbend Realty">
-
-  <div id="questionsContainer"></div>
-
-  <div class="errors" id="formErrors"></div>
-  <button id="loadPackBtn">Load questionnaire</button>
-  <button id="submitBtn" class="secondary" disabled>Create business</button>
-
-  <label style="margin-top:20px;">View existing business</label>
-  <input type="number" id="viewBusinessId" placeholder="Business ID">
-  <button id="viewBusinessBtn" class="secondary">View business</button>
-</section>
-
-<section id="stateSection" style="display:none;">
-  <h2>Live System State</h2>
-  <div id="businessCard"></div>
-  <div id="statusLine"></div>
-  <button id="pauseBtn" class="secondary">Pause auto-refresh</button>
-  <button id="refreshBtn" class="secondary">Refresh now</button>
-
-  <h2 style="margin-top:22px;">Contacts</h2>
-  <div id="contactsTable"></div>
-
-  <h2 style="margin-top:22px;">Follow-ups</h2>
-  <div id="followUpsTable"></div>
-
-  <h2 style="margin-top:22px;">Events</h2>
-  <div id="eventsTable"></div>
-
-  <h2 style="margin-top:22px;">Drafted Actions</h2>
-  <div id="draftedActionsTable"></div>
-
-  <h2 style="margin-top:22px;">Approval Policies</h2>
-  <div id="approvalPoliciesTable"></div>
-</section>
+<nav class="tabbar" id="tabBar" aria-label="Main"></nav>
+</main>
 
 <script>
 let currentPack = null;
 let businessId = null;
 let prevState = null;
+let lastJson = null;
 let pollTimer = null;
 let paused = false;
+let lastUpdated = null;
+let view = 'queue';
+const packNames = {};
+function industryName(id) { return packNames[id] || sentence(id); }
+const openDetails = new Set();
 
 const $ = (id) => document.getElementById(id);
 
@@ -147,9 +351,7 @@ function el(tag, opts = {}) {
     }
   }
   if (opts.on) {
-    for (const [evt, fn] of Object.entries(opts.on)) {
-      node.addEventListener(evt, fn);
-    }
+    for (const [evt, fn] of Object.entries(opts.on)) node.addEventListener(evt, fn);
   }
   if (opts.children) {
     for (const c of opts.children) {
@@ -163,81 +365,312 @@ function el(tag, opts = {}) {
 // Clears a container and replaces its children in one call.
 function setChildren(container, children) {
   container.replaceChildren();
-  for (const c of children) container.appendChild(c);
+  for (const c of children) {
+    if (c == null) continue;
+    container.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
 }
 
-// ---------- questionnaire ----------
+// Icons come from fixed path data in this file, never from server strings.
+const ICONS = {
+  queue: ['M4 6h16', 'M4 12h10', 'M4 18h7', 'M17 15l2 2 3-4'],
+  activity: ['M3 12h4l3-8 4 16 3-8h4'],
+  records: ['M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20', 'M10 4a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z', 'M20 20v-1.5a3.5 3.5 0 0 0-2.5-3.35', 'M15.5 4.3a3.5 3.5 0 0 1 0 6.4'],
+  settings: ['M4 7h10', 'M18 7h2', 'M4 17h4', 'M12 17h8', 'M16 5v4', 'M10 15v4'],
+  chevron: ['M7 10l5 5 5-5'],
+};
+function icon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v);
+  for (const d of ICONS[name] || []) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+// ---------- wording helpers ----------
+
+function sentence(key) {
+  const s = String(key ?? '').replace(/_/g, ' ').trim();
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+function words(key) { return String(key ?? '').replace(/_/g, ' '); }
+
+function settingValue(key, v) {
+  if (v === null || v === undefined || v === '') return 'Not set';
+  if (Array.isArray(v)) return sentence(v.map(words).join(', '));
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'number' && /_days$/.test(key)) return `${v} ${v === 1 ? 'day' : 'days'}`;
+  if (typeof v === 'object') return JSON.stringify(v);
+  const str = String(v);
+  return /^[a-z0-9]+(_[a-z0-9]+)+$/.test(str) ? words(str) : str;
+}
+function settingLabel(key) {
+  return sentence(String(key).replace(/_days$/, '')).replace(/follow up/i, m => m.replace(' ', '-'));
+}
+
+// SQLite datetime('now') is UTC without a zone marker.
+function parseTs(s) {
+  if (!s) return null;
+  const d = new Date(String(s).replace(' ', 'T') + (/[zZ+]/.test(s) ? '' : 'Z'));
+  return isNaN(d) ? null : d;
+}
+function niceTime(s) {
+  const d = parseTs(s);
+  if (!d) return '';
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const today = new Date(); const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return `today at ${t}`;
+  if (d.toDateString() === y.toDateString()) return `yesterday at ${t}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${t}`;
+}
+function capTime(s) { const t = niceTime(s); return t.charAt(0).toUpperCase() + t.slice(1); }
+function timeEl(s, prefix = '') {
+  const d = parseTs(s);
+  return el('span', { className: 'when', text: prefix ? prefix + niceTime(s) : capTime(s), attrs: { title: d ? d.toLocaleString() : null } });
+}
+function dueText(dateStr) {
+  if (!dateStr) return 'No due date';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d)) return `Due ${dateStr}`;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((d - today) / 86400000);
+  if (days === 0) return 'Due today';
+  if (days === 1) return 'Due tomorrow';
+  if (days < 0) return `Overdue by ${-days} ${-days === 1 ? 'day' : 'days'}`;
+  return `Due in ${days} days`;
+}
+
+const ACTION_STATE = {
+  pending_approval: ['Waiting for approval', 'attn'],
+  approved: ['Approved', 'ok'],
+  auto_approved: ['Sent automatically', 'ok'],
+  sent: ['Sent', 'ok'],
+  rejected: ['Rejected', 'bad'],
+};
+function stateEl(status) {
+  const [text, cls] = ACTION_STATE[status] || [sentence(status || 'unknown'), 'neutral'];
+  return el('span', { className: `state ${cls}`, text });
+}
+
+function contactName(state, contactId) {
+  if (contactId == null) return null;
+  const c = (state.contacts || []).find(x => x.id === contactId);
+  return c ? c.name : `Contact ${contactId}`;
+}
+
+function techDetails(key, obj) {
+  const d = el('details', { className: 'tech', children: [
+    el('summary', { text: 'Technical details' }),
+    codeBlock(JSON.stringify(obj, null, 2)),
+  ]});
+  if (openDetails.has(key)) d.open = true;
+  d.addEventListener('toggle', () => { d.open ? openDetails.add(key) : openDetails.delete(key); });
+  return d;
+}
+function codeBlock(text) {
+  const pre = el('pre', { className: 'code-block', text });
+  return el('div', { className: 'code-wrapper', children: [
+    pre,
+    el('button', { className: 'copy-btn', text: 'Copy', on: { click: (e) => {
+      navigator.clipboard?.writeText(pre.textContent);
+      e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1200);
+    }}}),
+  ]});
+}
+
+// ---------- navigation ----------
+
+const VIEWS = [
+  { id: 'queue', label: 'Queue', icon: 'queue' },
+  { id: 'activity', label: 'Activity', icon: 'activity' },
+  { id: 'records', label: 'Contacts', icon: 'records' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
+];
+function buildNav() {
+  const mk = (cls) => VIEWS.map(v => el('button', {
+    className: cls, attrs: { 'data-nav': v.id },
+    on: { click: () => showView(v.id) },
+    children: [icon(v.icon), el('span', { text: v.label }), el('span', { className: 'badge', attrs: { 'data-badge': v.id } })],
+  }));
+  setChildren($('navLinks'), mk('nav-link'));
+  setChildren($('tabBar'), mk(''));
+}
+function showView(id) {
+  if (!businessId && id !== 'setup') id = 'setup';
+  view = id;
+  document.querySelectorAll('[data-view]').forEach(s => { s.hidden = s.dataset.view !== id; });
+  document.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === id));
+  $('cancelSetupBtn').hidden = !businessId;
+  window.scrollTo(0, 0);
+}
+function setBadges(pending) {
+  document.querySelectorAll('[data-badge]').forEach(b => {
+    b.textContent = b.dataset.badge === 'queue' && pending ? String(pending) : '';
+    b.hidden = !(b.dataset.badge === 'queue' && pending);
+  });
+}
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('[data-tabpanel]').forEach(p => { p.hidden = p.dataset.tabpanel !== t.dataset.tab; });
+}));
+
+// ---------- business switcher ----------
+// There is no "list businesses" endpoint, so the switcher remembers the
+// businesses opened in this browser and still allows opening one by ID.
+
+function recentBusinesses() {
+  try { return JSON.parse(localStorage.getItem('opsnerd-recent') || '[]'); } catch { return []; }
+}
+function rememberBusiness(b) {
+  const list = recentBusinesses().filter(x => String(x.id) !== String(b.id));
+  list.unshift({ id: b.id, name: b.name, industry: b.industry_pack });
+  localStorage.setItem('opsnerd-recent', JSON.stringify(list.slice(0, 12)));
+}
+
+function renderSwitchers(business) {
+  document.querySelectorAll('[data-switcher]').forEach(host => {
+    const btn = el('button', { className: 'switcher-btn', attrs: { 'aria-haspopup': 'true', 'aria-expanded': 'false' }, children: [
+      el('span', { attrs: { style: 'min-width:0' }, children: [
+        el('span', { className: 'name', text: business ? business.name : 'No business open' }),
+        el('span', { className: 'sub', text: business ? industryName(business.industry_pack) : 'Choose or set one up' }),
+      ]}),
+      icon('chevron'),
+    ]});
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(host, btn); });
+    setChildren(host, [btn]);
+  });
+}
+
+function toggleMenu(host, btn) {
+  const existing = host.querySelector('.menu');
+  document.querySelectorAll('.menu').forEach(m => m.remove());
+  document.querySelectorAll('.switcher-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  if (existing) return;
+  btn.setAttribute('aria-expanded', 'true');
+
+  const list = el('div');
+  const filter = el('input', { attrs: { type: 'search', placeholder: 'Find a business', 'aria-label': 'Find a business' } });
+  const drawList = () => {
+    const q = filter.value.trim().toLowerCase();
+    const items = recentBusinesses().filter(b => !q || String(b.name).toLowerCase().includes(q));
+    setChildren(list, items.length ? items.map(b => el('button', { className: 'menu-item', on: { click: () => { closeMenus(); openBusiness(b.id); } }, children: [
+      el('div', { text: b.name }), el('div', { className: 'sub', text: industryName(b.industry) }),
+    ]})) : [el('div', { className: 'menu-item sub', text: q ? 'No match in recent businesses' : 'No recent businesses yet' })]);
+  };
+  filter.addEventListener('input', drawList);
+  drawList();
+
+  const idInput = el('input', { attrs: { type: 'number', id: 'viewBusinessId', min: '1', placeholder: 'ID', 'aria-label': 'Business ID' } });
+  const idErr = el('div', { className: 'small', attrs: { style: 'color:var(--red);padding:0 8px' } });
+  const go = async () => {
+    const id = idInput.value.trim();
+    if (!id) { idErr.textContent = 'Enter a business ID.'; return; }
+    const ok = await openBusiness(id, idErr);
+    if (ok) closeMenus();
+  };
+  idInput.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+
+  const menu = el('div', { className: 'menu', on: { click: e => e.stopPropagation() }, children: [
+    filter, list, el('hr'),
+    el('div', { className: 'open-id', children: [idInput, el('button', { className: 'btn', attrs: { id: 'viewBusinessBtn' }, text: 'Open', on: { click: go } })] }),
+    idErr,
+    el('hr'),
+    el('button', { className: 'menu-item', text: 'Set up a new business', on: { click: () => { closeMenus(); showView('setup'); } } }),
+  ]});
+  host.appendChild(menu);
+  filter.focus();
+}
+function closeMenus() {
+  document.querySelectorAll('.menu').forEach(m => m.remove());
+  document.querySelectorAll('.switcher-btn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+document.addEventListener('click', closeMenus);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+
+async function openBusiness(id, errTarget) {
+  const resp = await fetch(`/businesses/${id}/state`);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    const msg = `Could not open business ${id}: ${body.detail || resp.statusText}`;
+    if (errTarget) errTarget.textContent = msg; else $('formErrors').textContent = msg;
+    return false;
+  }
+  businessId = id;
+  prevState = null; lastJson = null;
+  localStorage.setItem('opsnerd-last', String(id));
+  showView('queue');
+  startPolling();
+  return true;
+}
+
+// ---------- setup questionnaire ----------
 
 async function loadPackOptions() {
   const select = $('packId');
   try {
     const resp = await fetch('/packs');
     const packs = await resp.json();
-    // Build option nodes (not string concatenation) so pack-controlled
+    // Option nodes, not string concatenation, so pack-controlled
     // display_name can't be parsed as HTML.
-    setChildren(select, packs.map(p =>
-      el('option', { attrs: { value: p.id }, text: p.display_name })
-    ));
+    for (const p of packs) packNames[p.id] = p.display_name;
+    if (prevState) renderSwitchers(prevState.business);
+    setChildren(select, packs.map(p => el('option', { attrs: { value: p.id }, text: p.display_name })));
+    await loadQuestionnaire();
   } catch (e) {
-    $('formErrors').textContent = `Error loading packs: ${e}`;
+    $('formErrors').textContent = `Error loading industries: ${e}`;
   }
 }
-loadPackOptions();
 
-$('loadPackBtn').addEventListener('click', async () => {
+async function loadQuestionnaire() {
   const packId = $('packId').value.trim();
   $('formErrors').replaceChildren();
+  $('submitBtn').disabled = true;
+  if (!packId) return;
   try {
     const resp = await fetch(`/packs/${packId}/questionnaire`);
     if (!resp.ok) {
       const body = await resp.json();
-      $('formErrors').textContent = `Failed to load pack: ${body.detail}`;
+      $('formErrors').textContent = `Could not load the questions: ${body.detail}`;
       return;
     }
-    const data = await resp.json();
-    currentPack = data;
-    renderQuestions(data.questions);
+    currentPack = await resp.json();
+    renderQuestions(currentPack.questions);
     $('submitBtn').disabled = false;
   } catch (e) {
     $('formErrors').textContent = `Error: ${e}`;
   }
-});
+}
+$('packId').addEventListener('change', loadQuestionnaire);
 
 function renderQuestions(questions) {
   const container = $('questionsContainer');
   container.replaceChildren();
   for (const q of questions) {
-    const label = document.createElement('label');
-    label.textContent = q.label;
+    const inputId = `q-${q.id}`;
+    const label = el('label', { text: q.label, attrs: { for: q.type === 'multiselect' ? null : inputId } });
     container.appendChild(label);
 
     if (q.type === 'multiselect') {
-      const row = document.createElement('div');
-      row.className = 'checkbox-row';
+      const row = el('div', { className: 'checkbox-row', attrs: { role: 'group', 'aria-label': q.label } });
       for (const opt of q.options || []) {
-        const cbLabel = document.createElement('label');
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = opt;
+        const cb = el('input', { className: 'q-multiselect', attrs: { type: 'checkbox', value: opt } });
         cb.dataset.qid = q.id;
-        cb.className = 'q-multiselect';
-        cbLabel.appendChild(cb);
-        cbLabel.append(' ' + opt);
-        row.appendChild(cbLabel);
+        row.appendChild(el('label', { children: [cb, sentence(opt)] }));
       }
       container.appendChild(row);
     } else if (q.type === 'boolean') {
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
+      const cb = el('input', { className: 'q-boolean', attrs: { type: 'checkbox', id: inputId } });
       cb.dataset.qid = q.id;
-      cb.className = 'q-boolean';
-      container.appendChild(cb);
+      container.appendChild(el('div', { className: 'bool-row', children: [cb, el('span', { className: 'muted', text: 'Yes' })] }));
     } else {
-      const input = document.createElement('input');
-      input.type = q.type === 'number' ? 'number' : 'text';
+      const input = el('input', { className: 'q-input', attrs: { type: q.type === 'number' ? 'number' : 'text', id: inputId } });
       input.dataset.qid = q.id;
       input.dataset.qtype = q.type;
-      input.className = 'q-input';
       container.appendChild(input);
     }
   }
@@ -252,14 +685,10 @@ function collectAnswers() {
   });
   const multiGroups = {};
   document.querySelectorAll('.q-multiselect:checked').forEach(el => {
-    const qid = el.dataset.qid;
-    (multiGroups[qid] ||= []).push(el.value);
+    (multiGroups[el.dataset.qid] ||= []).push(el.value);
   });
   Object.assign(answers, multiGroups);
-  document.querySelectorAll('.q-boolean').forEach(el => {
-    const qid = el.dataset.qid;
-    answers[qid] = el.checked;
-  });
+  document.querySelectorAll('.q-boolean').forEach(el => { answers[el.dataset.qid] = el.checked; });
   return answers;
 }
 
@@ -269,77 +698,69 @@ $('submitBtn').addEventListener('click', async () => {
   const packId = $('packId').value.trim();
   if (!name) { $('formErrors').textContent = 'Business name is required.'; return; }
 
-  const answers = collectAnswers();
   try {
     const resp = await fetch('/businesses', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name, industry_pack: packId, answers }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, industry_pack: packId, answers: collectAnswers() }),
     });
     const body = await resp.json();
     if (!resp.ok) {
-      // Build the error block with DOM nodes so server-supplied strings
-      // (validation issues, error detail) are rendered as text, not HTML.
+      // DOM nodes, so server-supplied strings render as text.
       const issues = body.detail?.issues || [String(body.detail)];
-      const errList = el('ul', { children: issues.map(i => el('li', { text: String(i) })) });
       setChildren($('formErrors'), [
-        el('strong', { text: 'Could not create business:' }),
-        errList,
+        el('strong', { text: 'Could not create the business:' }),
+        el('ul', { children: issues.map(i => el('li', { text: String(i) })) }),
       ]);
       return;
     }
-    businessId = body.business_id;
-    $('stateSection').style.display = 'block';
-    startPolling();
+    await openBusiness(body.business_id);
   } catch (e) {
     $('formErrors').textContent = `Error: ${e}`;
   }
 });
+$('cancelSetupBtn').addEventListener('click', () => showView('queue'));
 
-// ---------- state view ----------
+// ---------- polling ----------
 
 $('pauseBtn').addEventListener('click', () => {
   paused = !paused;
-  $('pauseBtn').textContent = paused ? 'Resume auto-refresh' : 'Pause auto-refresh';
-});
-$('refreshBtn').addEventListener('click', fetchState);
-
-$('viewBusinessBtn').addEventListener('click', async () => {
-  $('formErrors').replaceChildren();
-  const id = $('viewBusinessId').value.trim();
-  if (!id) { $('formErrors').textContent = 'Enter a business ID.'; return; }
-
-  const resp = await fetch(`/businesses/${id}/state`);
-  if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    $('formErrors').textContent = `Could not load business ${id}: ${body.detail || resp.statusText}`;
-    return;
-  }
-
-  businessId = id;
-  prevState = null;
-  $('stateSection').style.display = 'block';
-  startPolling();
+  $('pauseBtn').textContent = paused ? 'Resume' : 'Pause';
+  updateSync();
+  if (!paused) fetchState();
 });
 
 function startPolling() {
   fetchState();
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => { if (!paused) fetchState(); }, 2500);
+  pollTimer = setInterval(() => { if (!paused) fetchState(); updateSync(); }, 2500);
+  $('pauseBtn').hidden = false;
+}
+
+function updateSync() {
+  if (!businessId) { $('statusLine').textContent = 'Not connected'; return; }
+  if (paused) { $('statusLine').textContent = 'Updates paused'; return; }
+  if (!lastUpdated) { $('statusLine').textContent = 'Connecting'; return; }
+  const secs = Math.round((Date.now() - lastUpdated) / 1000);
+  $('statusLine').textContent = secs < 10 ? 'Updated just now' : `Updated ${secs}s ago`;
+  $('statusLine').title = `Last refreshed: ${new Date(lastUpdated).toLocaleTimeString()}`;
 }
 
 async function fetchState() {
   if (!businessId) return;
   const resp = await fetch(`/businesses/${businessId}/state`);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    $('formErrors').textContent = `Could not load business ${businessId}: ${body.detail || resp.statusText}`;
+    $('statusLine').textContent = 'Could not reach the server';
     return;
   }
   const state = await resp.json();
+  lastUpdated = Date.now();
+  updateSync();
+  const json = JSON.stringify(state);
+  if (json === lastJson) return;   // nothing changed, keep the page still
   render(state);
   prevState = state;
-  $('statusLine').textContent = `Last refreshed: ${new Date().toLocaleTimeString()}`;
+  lastJson = json;
 }
 
 function diffIds(prevList, newList) {
@@ -349,136 +770,231 @@ function diffIds(prevList, newList) {
     if (!prevById.has(row.id)) newIds.add(row.id);
     else if (prevById.get(row.id) !== JSON.stringify(row)) changedIds.add(row.id);
   }
-  return { newIds, changedIds };
+  return { newIds, changedIds, hasPrev: !!prevList };
+}
+function flashClass(id, diff) {
+  return diff.hasPrev && (diff.newIds.has(id) || diff.changedIds.has(id)) ? ' flash' : '';
 }
 
-function rowClass(id, diff) {
-  if (diff.newIds.has(id)) return 'row-new';
-  if (diff.changedIds.has(id)) return 'row-changed';
-  return '';
-}
+// ---------- render ----------
 
 function render(state) {
-  renderBusinessCard(state.business);
-  renderTable('contactsTable', state.contacts, prevState?.contacts,
-    ['id','name','email','phone','status'], ['extension_data']);
-  renderTable('followUpsTable', state.follow_ups, prevState?.follow_ups,
-    ['id','contact_id','type','status','due_date','notes'], ['extension_data']);
-  renderTable('eventsTable', state.events, prevState?.events,
-    ['id','contact_id','source','processed','received_at','raw_content'], ['parsed_data']);
-  renderDraftedActionsTable(state.drafted_actions, prevState?.drafted_actions);
-  renderTable('approvalPoliciesTable', state.approval_policies, prevState?.approval_policies,
-    ['id','action_type','auto_approve'], []);
+  rememberBusiness(state.business);
+  renderSwitchers(state.business);
+  const pending = state.drafted_actions.filter(a => a.status === 'pending_approval');
+  setBadges(pending.length);
+  renderSummary(state, pending.length);
+  renderQueue(state, prevState?.drafted_actions);
+  renderActivity(state, prevState?.events);
+  renderContacts(state);
+  renderFollowUps(state);
+  renderSettings(state);
 }
 
-function renderBusinessCard(business) {
-  const container = $('businessCard');
-  const changed = prevState && JSON.stringify(prevState.business) !== JSON.stringify(business);
-  container.className = changed ? 'row-changed' : '';
+function renderSummary(state, pending) {
+  const queued = state.events.filter(e => !e.processed).length;
+  const active = state.contacts.filter(c => c.status === 'active').length;
+  const open = state.follow_ups.filter(f => f.status === 'pending').length;
+  const link = (text, v) => el('button', { text, on: { click: () => showView(v) } });
+  setChildren($('summaryLine'), [
+    el('span', { className: pending ? 'attn' : '', text: pending ? `${pending} ${pending === 1 ? 'needs' : 'need'} approval` : 'Nothing waiting on you' }),
+    link(`${state.events.length} ${state.events.length === 1 ? 'message' : 'messages'}${queued ? `, ${queued} still processing` : ''}`, 'activity'),
+    link(`${active} active ${active === 1 ? 'contact' : 'contacts'}`, 'records'),
+    link(`${open} open ${open === 1 ? 'follow-up' : 'follow-ups'}`, 'records'),
+  ]);
+}
 
-  const cell = (cls, text) => el('td', { className: cls, text });
-  const header = (cls, text) => el('th', { className: cls, text });
+function reviewItem(state, action, diff) {
+  const event = state.events.find(e => e.id === action.event_id);
+  const who = contactName(state, action.contact_id);
+  const payload = action.payload ?? {};
+  const body = typeof payload.body === 'string' ? payload.body : null;
+  const others = Object.entries(payload).filter(([k]) => k !== 'body');
+  const parsed = event?.parsed_data || {};
+  const reasons = Object.entries(parsed).filter(([k, v]) => k !== 'action_type' && v !== null && v !== '');
 
-  const table = el('table', { children: [
-    el('tr', { children: [
-      header('core', 'id'), cell('core', business.id),
-      header('core', 'name'), cell('core', business.name),
+  return el('article', { className: 'review' + flashClass(action.id, diff), children: [
+    el('div', { className: 'eyebrow', text: 'Waiting for your approval' }),
+    el('div', { className: 'review-head', children: [
+      el('h2', { text: sentence(action.action_type) + (who ? ` for ${who}` : '') }),
+      event ? timeEl(event.received_at) : null,
     ]}),
-    el('tr', { children: [
-      header('core', 'industry_pack'), cell('core', business.industry_pack),
-      header('core', 'pack_version'), cell('core', business.pack_version),
+    el('div', { className: 'meta', text: event ? (who ? `Drafted from ${who}\u2019s ${words(event.source)}` : `Drafted from ${/^[aeiou]/i.test(words(event.source)) ? 'an' : 'a'} ${words(event.source)}`) : 'Drafted by the system' }),
+    event ? el('div', { className: 'block', children: [
+      el('div', { className: 'label', text: who ? `${who} wrote` : 'Incoming message' }),
+      el('blockquote', { className: 'quote', text: event.raw_content }),
+    ]}) : null,
+    el('div', { className: 'block', children: [
+      el('div', { className: 'label', text: 'Draft' }),
+      body != null ? el('div', { className: 'draft', text: body }) : null,
+      ...others.map(([k, v]) => el('div', { children: [el('span', { className: 'muted', text: sentence(k) + ': ' }), settingValue(k, v)] })),
+      body == null && others.length === 0 ? el('div', { className: 'muted', text: 'The draft is empty.' }) : null,
     ]}),
-    el('tr', { children: [
-      header('config', 'settings_json'),
-      el('td', { className: 'config', attrs: { colspan: '3' }, children: [
-        el('code', { className: 'kv', text: JSON.stringify(business.settings_json ?? {}, null, 2) }),
-      ]}),
+    reasons.length ? el('div', { className: 'block', children: [
+      el('div', { className: 'label', text: 'Why this was drafted' }),
+      el('div', { className: 'why', children: reasons.map(([k, v]) => el('span', { children: [el('span', { className: 'k', text: sentence(k.replace(/_ref$/, '')) }), String(settingValue(k, v))] })) }),
+    ]}) : null,
+    el('div', { className: 'decide', children: [
+      el('button', { className: 'btn primary', text: 'Approve & send', on: { click: () => approveAction(action.id) } }),
+      el('button', { className: 'btn', text: 'Reject', on: { click: () => rejectAction(action.id) } }),
+      el('span', { className: 'note', text: 'Sending is simulated in this prototype.' }),
     ]}),
+    techDetails(`action-${action.id}`, { action, event: event || null }),
   ]});
-
-  setChildren(container, [table]);
 }
 
-function renderTable(containerId, rows, prevRows, coreCols, configCols) {
-  const container = $(containerId);
-  if (!rows || rows.length === 0) {
-    setChildren(container, [el('div', { className: 'empty-note', text: 'None yet.' })]);
-    return;
-  }
-  const diff = diffIds(prevRows, rows);
-
-  const headerRow = el('tr', { children: [
-    ...coreCols.map(c => el('th', { className: 'core', text: c })),
-    ...configCols.map(c => el('th', { className: 'config', text: c })),
-  ]});
-  const thead = el('thead', { children: [headerRow] });
-
-  const tbody = el('tbody', { children: rows.map(row => {
-    const coreCells = coreCols.map(c => el('td', { className: 'core', text: formatCell(row[c]) }));
-    const configCells = configCols.map(c => el('td', { className: 'config', children: [
-      el('code', { className: 'kv', text: JSON.stringify(row[c] ?? {}, null, 2) }),
-    ]}));
-    return el('tr', { className: rowClass(row.id, diff), children: [...coreCells, ...configCells] });
-  })});
-
-  setChildren(container, [el('table', { children: [thead, tbody] })]);
-}
-
-function formatCell(v) {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  return String(v);
-}
-
-// ---------- drafted actions (approve/reject) ----------
-
-function renderDraftedActionsTable(rows, prevRows) {
+function renderQueue(state, prevRows) {
   const container = $('draftedActionsTable');
-  if (!rows || rows.length === 0) {
-    setChildren(container, [el('div', { className: 'empty-note', text: 'None yet.' })]);
-    return;
-  }
-  const coreCols = ['id','event_id','contact_id','action_type','status'];
-  const diff = diffIds(prevRows, rows);
+  const diff = diffIds(prevRows, state.drafted_actions);
+  const pending = state.drafted_actions.filter(a => a.status === 'pending_approval').sort((a, b) => a.id - b.id);
+  const handled = state.drafted_actions.filter(a => a.status !== 'pending_approval').sort((a, b) => b.id - a.id);
 
-  const headerRow = el('tr', { children: [
-    ...coreCols.map(c => el('th', { className: 'core', text: c })),
-    el('th', { className: 'config', text: 'payload' }),
-    el('th', { className: 'core', text: 'actions' }),
-  ]});
-  const thead = el('thead', { children: [headerRow] });
+  const parts = pending.length
+    ? pending.map(a => reviewItem(state, a, diff))
+    : [el('div', { className: 'empty', children: [el('strong', { text: 'You\u2019re all caught up.' }), 'New drafts show up here as messages come in.'] })];
 
-  const tbody = el('tbody', { children: rows.map(row => {
-    const coreCells = coreCols.map(c => el('td', { className: 'core', text: formatCell(row[c]) }));
-    const payloadCell = el('td', { className: 'config', children: [
-      el('code', { className: 'kv', text: JSON.stringify(row.payload ?? {}, null, 2) }),
+  if (handled.length) {
+    const hist = el('details', { className: 'history', children: [
+      el('summary', { text: `Recently handled (${handled.length})` }),
+      el('div', { className: 'rows', children: handled.map(a => {
+        const who = contactName(state, a.contact_id);
+        return el('div', { className: 'row' + flashClass(a.id, diff), children: [
+          el('div', { className: 'title', text: sentence(a.action_type) + (who ? ` for ${who}` : '') }),
+          stateEl(a.status),
+          a.decided_at ? el('div', { className: 'desc small muted', text: `Decided ${niceTime(a.decided_at)}` }) : null,
+          techDetails(`handled-${a.id}`, a),
+        ]});
+      })}),
     ]});
-    const actionsCell = el('td', { className: 'core' });
-    if (row.status === 'pending_approval') {
-      actionsCell.appendChild(el('button', {
-        className: 'secondary', text: 'Approve',
-        on: { click: () => approveAction(row.id) },
-      }));
-      actionsCell.appendChild(el('button', {
-        className: 'secondary', text: 'Reject',
-        on: { click: () => rejectAction(row.id) },
-      }));
-    }
-    return el('tr', { className: rowClass(row.id, diff), children: [...coreCells, payloadCell, actionsCell] });
-  })});
-
-  setChildren(container, [el('table', { children: [thead, tbody] })]);
+    if (openDetails.has('history')) hist.open = true;
+    hist.addEventListener('toggle', () => { hist.open ? openDetails.add('history') : openDetails.delete('history'); });
+    parts.push(hist);
+  }
+  setChildren(container, parts);
 }
+
+function renderActivity(state, prevEvents) {
+  const container = $('eventsTable');
+  if (!state.events.length) { setChildren(container, [el('div', { className: 'empty', text: 'No messages yet.' })]); return; }
+  const diff = diffIds(prevEvents, state.events);
+  const events = [...state.events].sort((a, b) => b.id - a.id);
+  setChildren(container, [el('div', { className: 'rows timeline', children: events.map(ev => {
+    const who = contactName(state, ev.contact_id) || 'Unknown sender';
+    const actions = state.drafted_actions.filter(a => a.event_id === ev.id);
+    const steps = [];
+    if (!ev.processed) steps.push(el('div', { text: 'Waiting to be processed' }));
+    for (const a of actions) {
+      steps.push(el('div', { children: [`${sentence(a.action_type)} drafted \u2014 `, stateEl(a.status)] }));
+    }
+    if (ev.processed && !actions.length) steps.push(el('div', { text: 'Processed, nothing drafted' }));
+    const rowState = !ev.processed ? ' processing' : actions.some(a => a.status === 'pending_approval') ? ' waiting' : '';
+    return el('div', { className: 'row' + rowState + flashClass(ev.id, diff), children: [
+      el('div', { className: 'title', text: `${sentence(words(ev.source))} from ${who}` }),
+      timeEl(ev.received_at),
+      el('div', { className: 'desc', text: ev.raw_content }),
+      el('div', { className: 'children', children: steps }),
+      techDetails(`event-${ev.id}`, { event: ev, drafted_actions: actions }),
+    ]});
+  })})]);
+}
+
+function renderContacts(state) {
+  const container = $('contactsTable');
+  const q = ($('contactSearch').value || '').trim().toLowerCase();
+  const rows = state.contacts.filter(c => !q || [c.name, c.email, c.phone].some(v => String(v || '').toLowerCase().includes(q)));
+  if (!rows.length) { setChildren(container, [el('div', { className: 'empty', text: q ? 'No contacts match.' : 'No contacts yet.' })]); return; }
+  setChildren(container, [el('div', { className: 'rows', children: rows.map(c => {
+    const extra = Object.entries(c.extension_data || {});
+    return el('div', { className: 'row', children: [
+      el('div', { className: 'title', text: c.name }),
+      el('span', { className: `state ${c.status === 'active' ? 'ok' : 'neutral'}`, text: sentence(c.status) }),
+      el('div', { className: 'desc', text: [c.email, c.phone].filter(Boolean).join(' \u00B7 ') || 'No contact details' }),
+      extra.length ? el('div', { className: 'desc small', text: extra.map(([k, v]) => `${sentence(k)}: ${settingValue(k, v)}`).join(' \u00B7 ') }) : null,
+      techDetails(`contact-${c.id}`, c),
+    ]});
+  })})]);
+}
+$('contactSearch').addEventListener('input', () => { if (prevState) renderContacts(prevState); });
+
+function renderFollowUps(state) {
+  const container = $('followUpsTable');
+  if (!state.follow_ups.length) { setChildren(container, [el('div', { className: 'empty', text: 'No follow-ups scheduled.' })]); return; }
+  const rows = [...state.follow_ups].sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+  setChildren(container, [el('div', { className: 'rows', children: rows.map(f => {
+    const who = contactName(state, f.contact_id);
+    return el('div', { className: 'row', children: [
+      el('div', { className: 'title', text: `${sentence(f.type)}${who ? ` ${who}` : ''}` }),
+      el('span', { className: `state ${f.status === 'pending' ? 'neutral' : 'ok'}`, text: f.status === 'pending' ? dueText(f.due_date) : sentence(f.status) }),
+      f.notes ? el('div', { className: 'desc', text: f.notes }) : null,
+      techDetails(`followup-${f.id}`, f),
+    ]});
+  })})]);
+}
+
+function renderSettings(state) {
+  const b = state.business;
+  const settings = Object.entries(b.settings_json ?? {});
+  const dl = (pairs) => el('dl', { className: 'dl', children: pairs.map(([k, v]) => el('div', { children: [el('dt', { text: k }), el('dd', { text: v })] })) });
+  setChildren($('businessCard'), [dl([
+    ['Name', b.name],
+    ['Industry', industryName(b.industry_pack)],
+    ['Created', sentence(niceTime(b.created_at))],
+    ...settings.map(([k, v]) => [settingLabel(k), settingValue(k, v)]),
+  ])]);
+
+  const policies = state.approval_policies;
+  setChildren($('approvalPoliciesTable'), [policies.length
+    ? el('div', { className: 'rows', children: policies.map(p => el('div', { className: 'row', children: [
+        el('div', { className: 'title', text: sentence(p.action_type) }),
+        el('span', { className: `state ${p.auto_approve ? 'ok' : 'neutral'}`, text: p.auto_approve ? 'Runs automatically' : 'Needs approval' }),
+      ]})) })
+    : el('div', { className: 'empty', text: 'Every drafted action needs approval.' })]);
+
+  const techWrap = el('details', { className: 'tech' });
+  if (openDetails.has('settings-tech')) techWrap.open = true;
+  techWrap.addEventListener('toggle', () => { techWrap.open ? openDetails.add('settings-tech') : openDetails.delete('settings-tech'); });
+  setChildren($('techDetails'), [techWrap]);
+  setChildren(techWrap, [
+    el('summary', { text: 'Show IDs, template version and raw data' }),
+    el('p', { className: 'lede small', text: 'For debugging. Core fields are the same for every industry; settings and additional details come from the industry template (Config Pack).' }),
+    el('dl', { className: 'dl', children: [
+      ['Business ID', String(b.id)], ['Config Pack', b.industry_pack], ['Pack version', b.pack_version], ['Created (UTC)', b.created_at],
+    ].map(([k, v]) => el('div', { children: [el('dt', { text: k }), el('dd', { text: v, attrs: { style: 'font-family:var(--mono);font-size:calc(13px * var(--font-scale))' } })] })) }),
+    techDetails('business-raw', b),
+  ]);
+}
+
+// ---------- approve / reject ----------
 
 async function approveAction(actionId) {
   await fetch(`/drafted-actions/${actionId}/approve`, { method: 'POST' });
   fetchState();
 }
-
 async function rejectAction(actionId) {
   await fetch(`/drafted-actions/${actionId}/reject`, { method: 'POST' });
   fetchState();
 }
+
+// ---------- theme ----------
+
+function applyThemeChoice(choice) {
+  localStorage.setItem('opsnerd-theme', choice);
+  const t = choice === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : choice;
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('[data-theme-opt]').forEach(b => b.classList.toggle('on', b.dataset.themeOpt === choice));
+}
+document.querySelectorAll('[data-theme-opt]').forEach(b => b.addEventListener('click', () => applyThemeChoice(b.dataset.themeOpt)));
+applyThemeChoice(localStorage.getItem('opsnerd-theme') || 'system');
+document.documentElement.style.setProperty('--font-scale', localStorage.getItem('ui-font-scale') || '1');
+
+// ---------- start ----------
+
+buildNav();
+renderSwitchers(null);
+loadPackOptions();
+const last = new URLSearchParams(location.search).get('business') || localStorage.getItem('opsnerd-last');
+if (last) openBusiness(last).then(ok => { if (!ok) { $('formErrors').replaceChildren(); showView('setup'); } });
+else showView('setup');
 </script>
 </body>
 </html>
