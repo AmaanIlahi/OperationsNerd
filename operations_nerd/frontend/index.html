@@ -230,6 +230,12 @@ function renderQuestions(questions) {
       const select = document.createElement('select');
       select.dataset.qid = q.id;
       select.className = 'q-select';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select one';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.appendChild(placeholder);
       for (const opt of q.options || []) {
         const optionEl = document.createElement('option');
         optionEl.value = opt;

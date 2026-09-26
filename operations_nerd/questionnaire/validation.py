@@ -53,7 +53,7 @@ def _validate_one(question: Question, value) -> list[str]:
             issues.append(f"{question.id}: expected a list of options, got {type(value).__name__}")
         else:
             allowed = set(question.options or [])
-            invalid = [v for v in value if v not in allowed]
+            invalid = [v for v in value if not isinstance(v, str) or v not in allowed]
             if invalid:
                 issues.append(
                     f"{question.id}: invalid option(s) {invalid}, "
@@ -61,12 +61,15 @@ def _validate_one(question: Question, value) -> list[str]:
                 )
 
     elif question.type == "select":
-        allowed = set(question.options or [])
-        if value not in allowed:
-            issues.append(
-                f"{question.id}: invalid option {value!r}, "
-                f"allowed values are {sorted(allowed)}"
-            )
+        if not isinstance(value, str):
+            issues.append(f"{question.id}: expected text, got {type(value).__name__}")
+        else:
+            allowed = set(question.options or [])
+            if value not in allowed:
+                issues.append(
+                    f"{question.id}: invalid option {value!r}, "
+                    f"allowed values are {sorted(allowed)}"
+                )
 
     else:
         issues.append(f"{question.id}: pack declares unknown question type '{question.type}'")
