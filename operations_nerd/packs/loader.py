@@ -36,7 +36,7 @@ from pydantic import BaseModel, ValidationError
 class Question(BaseModel):
     id: str
     label: str
-    type: str                      # text | number | multiselect | boolean
+    type: str                      # text | number | multiselect | boolean | select
     settings_key: str
     options: list[str] | None = None
 

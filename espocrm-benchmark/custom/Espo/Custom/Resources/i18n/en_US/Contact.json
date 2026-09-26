@@ -1,0 +1,27 @@
+{
+    "fields": {
+        "cPreferredContactMethod": "Preferred Contact Method",
+        "cPreferredLanguage": "Preferred Language",
+        "cReferralSource": "Referral Source"
+    },
+    "options": {
+        "cPreferredContactMethod": {
+            "Phone": "Phone",
+            "Email": "Email",
+            "SMS": "SMS",
+            "In-Person": "In-Person"
+        },
+        "cPreferredLanguage": {
+            "English": "English",
+            "Spanish": "Spanish",
+            "Other": "Other"
+        },
+        "cReferralSource": {
+            "": "",
+            "Referral": "Referral",
+            "Walk-in": "Walk-in",
+            "Online Ad": "Online Ad",
+            "Social Media": "Social Media"
+        }
+    }
+}

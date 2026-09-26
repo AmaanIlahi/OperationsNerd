@@ -64,4 +64,38 @@ print("POST /businesses (invalid) ->", resp.status_code)
 assert resp.status_code == 422
 print("  Issues:", resp.json()["detail"]["issues"])
 
+# 6. Submit a select answer as a list -> must reject with 422, not crash with 500
+resp = client.post("/businesses", json={
+    "name": "Bad Gym",
+    "industry_pack": "healthclub",
+    "answers": {
+        "business_hours": "9-6",
+        "free_trial_days": 7,
+        "membership_types": ["basic"],
+        "offers_personal_training": True,
+        "preferred_language": ["English"],   # wrong type, must not crash
+        "referral_source": "Walk-in",
+    },
+})
+print("POST /businesses (select as list) ->", resp.status_code)
+assert resp.status_code == 422
+print("  Issues:", resp.json()["detail"]["issues"])
+
+# 7. Submit a select answer as an object -> same, must reject with 422
+resp = client.post("/businesses", json={
+    "name": "Bad Gym 2",
+    "industry_pack": "healthclub",
+    "answers": {
+        "business_hours": "9-6",
+        "free_trial_days": 7,
+        "membership_types": ["basic"],
+        "offers_personal_training": True,
+        "preferred_language": {"choice": "English"},   # wrong type, must not crash
+        "referral_source": "Walk-in",
+    },
+})
+print("POST /businesses (select as object) ->", resp.status_code)
+assert resp.status_code == 422
+print("  Issues:", resp.json()["detail"]["issues"])
+
 print("\nQuestionnaire API smoke test passed.")
