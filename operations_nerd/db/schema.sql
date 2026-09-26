@@ -109,3 +109,22 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_business ON follow_ups(business_id);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON follow_ups(contact_id);
 CREATE INDEX IF NOT EXISTS idx_events_business ON events(business_id);
 CREATE INDEX IF NOT EXISTS idx_drafted_actions_business ON drafted_actions(business_id);
+
+-- Chat-onboarding CRM records (Account / Contact / Lead). entity_type values
+-- are pack-declared and namespaced crm_* so they never collide with the
+-- 'contact' / 'follow_up' values already used in entity_attributes. All
+-- fields live in entity_attributes; this table only anchors identity and
+-- ownership.
+CREATE TABLE IF NOT EXISTS entities (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id  INTEGER NOT NULL REFERENCES businesses(id),
+    entity_type  TEXT NOT NULL,       -- crm_account | crm_contact | crm_lead
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_entities_business_type
+    ON entities(business_id, entity_type);
+
+-- businesses.owner_key (TEXT, nullable; NULL for questionnaire-created
+-- businesses) is added by init_db() rather than here: SQLite has no
+-- ADD COLUMN IF NOT EXISTS, and this file is re-run on every init_db().
