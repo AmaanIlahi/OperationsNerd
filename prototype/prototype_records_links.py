@@ -190,12 +190,112 @@ record_types:
 
 # --------------------------------------------------------------- loader
 
+class PackDeclarationError(ValueError):
+    """Raised when a pack's record_types block is malformed or unsupported.
+
+    The point of this class: the current core's Pack model uses pydantic's
+    default extra='ignore', so an unknown block is silently discarded (see
+    WAREHOUSE_FAILURE_NOTES.md step 11). A pack author gets no error, no
+    warning, and no record types. Every path below raises instead. Nothing a
+    pack declares is ever dropped in silence.
+    """
+
+
+TYPE_KEYS = {"name", "label", "fields", "links"}
+LINK_KEYS = {"name", "to", "required", "on_delete"}
+ON_DELETE = {"restrict", "cascade"}
+
+
+def validate_record_types(pack):
+    """Check the record_types block before a single row is written.
+
+    Returns the validated block. Raises PackDeclarationError with a message
+    naming the offending declaration.
+    """
+    block = pack.get("record_types", [])
+
+    if block == []:
+        return []
+    if not isinstance(block, list):
+        raise PackDeclarationError(
+            f"record_types must be a list, got {type(block).__name__}")
+
+    names = []
+    for i, rt in enumerate(block):
+        where = f"record_types[{i}]"
+        if not isinstance(rt, dict):
+            raise PackDeclarationError(f"{where} must be a mapping, got {type(rt).__name__}")
+        if not rt.get("name"):
+            raise PackDeclarationError(f"{where} has no name")
+        name = rt["name"]
+        if name in names:
+            raise PackDeclarationError(f"duplicate record type '{name}'")
+        names.append(name)
+
+        unknown = set(rt) - TYPE_KEYS
+        if unknown:
+            raise PackDeclarationError(
+                f"record type '{name}' has unsupported key(s) {sorted(unknown)}; "
+                f"supported keys are {sorted(TYPE_KEYS)}")
+
+        if "fields" in rt and not isinstance(rt["fields"], list):
+            raise PackDeclarationError(f"record type '{name}': fields must be a list")
+
+    # links are checked second, so a link may point at any type declared above
+    for rt in block:
+        name = rt["name"]
+        links = rt.get("links", [])
+        if not isinstance(links, list):
+            raise PackDeclarationError(f"record type '{name}': links must be a list")
+
+        seen = []
+        for j, link in enumerate(links):
+            where = f"record type '{name}' link[{j}]"
+            if not isinstance(link, dict):
+                raise PackDeclarationError(f"{where} must be a mapping")
+            if not link.get("name"):
+                raise PackDeclarationError(f"{where} has no name")
+            link_name = link["name"]
+            if link_name in seen:
+                raise PackDeclarationError(
+                    f"record type '{name}' declares link '{link_name}' twice")
+            seen.append(link_name)
+
+            unknown = set(link) - LINK_KEYS
+            if unknown:
+                raise PackDeclarationError(
+                    f"{where} '{link_name}' has unsupported key(s) {sorted(unknown)}; "
+                    f"supported keys are {sorted(LINK_KEYS)}")
+
+            if "to" not in link:
+                raise PackDeclarationError(f"{where} '{link_name}' has no target ('to')")
+            target = link["to"]
+            if target != "contact" and target not in names:
+                raise PackDeclarationError(
+                    f"{where} '{link_name}' points at '{target}', which is neither "
+                    f"'contact' nor a declared record type {names}")
+
+            on_delete = link.get("on_delete", "restrict")
+            if on_delete not in ON_DELETE:
+                raise PackDeclarationError(
+                    f"{where} '{link_name}' has on_delete='{on_delete}'; "
+                    f"must be one of {sorted(ON_DELETE)}")
+
+            if not isinstance(link.get("required", False), bool):
+                raise PackDeclarationError(
+                    f"{where} '{link_name}': required must be true or false")
+
+    return block
+
+
 def install_pack(conn, business_id, pack):
-    """Turn the pack's record_types block into rows. This is the whole loader."""
-    for rt in pack.get("record_types", []):
+    """Turn the pack's record_types block into rows, validating first."""
+    block = validate_record_types(pack)
+
+    for rt in block:
         conn.execute("INSERT INTO record_types (business_id, name, label) VALUES (?,?,?)",
                      (business_id, rt["name"], rt.get("label")))
-    for rt in pack.get("record_types", []):
+    for rt in block:
         for link in rt.get("links", []):
             to = link["to"]
             to_kind = "contact" if to == "contact" else "record"

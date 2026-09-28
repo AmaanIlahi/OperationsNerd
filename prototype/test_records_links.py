@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from prototype_records_links import (
     SCHEMA, WAREHOUSE_PACK, install_pack, create_record, add_link,
+    validate_record_types, PackDeclarationError,
 )
 
 failures = []
@@ -235,12 +236,110 @@ def test_rejection_reasons_are_distinct():
           len(set(messages)) == 3, f"got {messages}")
 
 
+
+# ------------------------------------------------------------------ validation
+# Harsh's instruction: keep record_types validation in the prototype loader for
+# now, and hand Amaan the proposed core change separately. These cover it.
+
+def rejects_declaration(label, block, expect_fragment):
+    """Assert a malformed record_types block raises, for the stated reason."""
+    global checks
+    checks += 1
+    try:
+        validate_record_types({"record_types": block})
+    except PackDeclarationError as e:
+        if expect_fragment.lower() in str(e).lower():
+            print(f"  ok    {label}  ({e})")
+        else:
+            print(f"  FAIL  {label}  rejected for the wrong reason: {e}")
+            failures.append(label)
+        return
+    except Exception as e:
+        print(f"  FAIL  {label}  wrong exception type: {type(e).__name__}: {e}")
+        failures.append(label)
+        return
+    print(f"  FAIL  {label}  accepted, should have been rejected")
+    failures.append(label)
+
+
+def test_declaration_validation():
+    """
+    Nothing a pack declares may be dropped in silence. The core's Pack model
+    uses pydantic's extra='ignore', so an unsupported block vanishes with no
+    error (failure notes, step 11). The prototype loader raises instead.
+    """
+    print("\n--- record_types validation ---")
+
+    # the well-formed pack still validates
+    good = yaml.safe_load(WAREHOUSE_PACK)["record_types"]
+    check("the warehouse declaration validates cleanly",
+          validate_record_types({"record_types": good}) == good)
+
+    check("an absent block is fine (returns empty)",
+          validate_record_types({"id": "healthclub"}) == [])
+
+    rejects_declaration("a non-list record_types is rejected",
+                        {"item": {}}, "must be a list")
+
+    rejects_declaration("a record type with no name is rejected",
+                        [{"label": "Nameless"}], "has no name")
+
+    rejects_declaration("a duplicate record type is rejected",
+                        [{"name": "item"}, {"name": "item"}], "duplicate")
+
+    rejects_declaration("an unsupported key on a record type is rejected",
+                        [{"name": "item", "colums": ["sku"]}], "unsupported key")
+
+    rejects_declaration("an unsupported key on a link is rejected",
+                        [{"name": "item"},
+                         {"name": "line", "links": [
+                             {"name": "item", "to": "item", "requried": True}]}],
+                        "unsupported key")
+
+    rejects_declaration("a link with no target is rejected",
+                        [{"name": "line", "links": [{"name": "item"}]}], "no target")
+
+    rejects_declaration("a link pointing at an undeclared type is rejected",
+                        [{"name": "line", "links": [{"name": "item", "to": "widget"}]}],
+                        "neither 'contact' nor a declared record type")
+
+    rejects_declaration("an invalid on_delete is rejected",
+                        [{"name": "item"},
+                         {"name": "line", "links": [
+                             {"name": "item", "to": "item", "on_delete": "explode"}]}],
+                        "on_delete")
+
+    rejects_declaration("a non-boolean required is rejected",
+                        [{"name": "item"},
+                         {"name": "line", "links": [
+                             {"name": "item", "to": "item", "required": "yes"}]}],
+                        "must be true or false")
+
+    rejects_declaration("the same link declared twice is rejected",
+                        [{"name": "item"},
+                         {"name": "line", "links": [
+                             {"name": "item", "to": "item"},
+                             {"name": "item", "to": "item"}]}],
+                        "twice")
+
+    # and a rejected declaration writes nothing at all
+    conn, bid = fresh(with_pack=False)
+    try:
+        install_pack(conn, bid, {"record_types": [{"name": "item", "colums": []}]})
+    except PackDeclarationError:
+        pass
+    n = conn.execute("SELECT COUNT(*) FROM record_types WHERE business_id=?",
+                     (bid,)).fetchone()[0]
+    check("a rejected declaration writes no rows", n == 0, f"got {n}")
+
+
 def main():
     print("=" * 70)
     print("RECORDS + LINKS: focused tests")
     print("=" * 70)
 
     test_absent_record_types_registers_nothing()
+    test_declaration_validation()
     test_valid_declaration_registers()
     test_rejections()
     test_rejection_reasons_are_distinct()
