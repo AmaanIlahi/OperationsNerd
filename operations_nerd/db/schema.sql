@@ -128,3 +128,57 @@ CREATE INDEX IF NOT EXISTS idx_entities_business_type
 -- businesses.owner_key (TEXT, nullable; NULL for questionnaire-created
 -- businesses) is added by init_db() rather than here: SQLite has no
 -- ADD COLUMN IF NOT EXISTS, and this file is re-run on every init_db().
+
+-- Agentic CRM (see documentation/agentic_crm_architecture.md). All additive.
+-- businesses.current_version (INTEGER, nullable) is added by init_db() for
+-- the same reason as owner_key above; businesses.owner_key holds the
+-- account id as text.
+CREATE TABLE IF NOT EXISTS accounts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    email           TEXT NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL REFERENCES accounts(id),
+    token_hash      TEXT NOT NULL UNIQUE,   -- the raw token only ever lives in the cookie
+    expires_at      TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS spec_versions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id     INTEGER NOT NULL REFERENCES businesses(id),
+    version         INTEGER NOT NULL,
+    spec_json       TEXT NOT NULL,
+    ops_json        TEXT NOT NULL DEFAULT '[]',
+    source          TEXT NOT NULL,          -- agent | revert | template
+    proposal_id     INTEGER REFERENCES proposals(id),
+    approved_by     INTEGER REFERENCES accounts(id),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(business_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id         INTEGER NOT NULL REFERENCES businesses(id),
+    base_version        INTEGER NOT NULL,
+    messages_json       TEXT NOT NULL DEFAULT '[]',
+    reply               TEXT,
+    ops_json            TEXT NOT NULL DEFAULT '[]',
+    rejected_ops_json   TEXT NOT NULL DEFAULT '[]',
+    impact_json         TEXT NOT NULL DEFAULT '{}',
+    status              TEXT NOT NULL DEFAULT 'pending',
+    model               TEXT,
+    input_tokens        INTEGER,
+    output_tokens       INTEGER,
+    latency_ms          INTEGER,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    decided_at          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+CREATE INDEX IF NOT EXISTS idx_spec_versions_business ON spec_versions(business_id, version);
+CREATE INDEX IF NOT EXISTS idx_proposals_business ON proposals(business_id);

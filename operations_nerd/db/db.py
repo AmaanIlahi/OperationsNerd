@@ -32,6 +32,8 @@ def init_db(db_path: str = DB_PATH, reset: bool = False):
     business_columns = {r[1] for r in conn.execute("PRAGMA table_info(businesses)")}
     if "owner_key" not in business_columns:
         conn.execute("ALTER TABLE businesses ADD COLUMN owner_key TEXT")
+    if "current_version" not in business_columns:
+        conn.execute("ALTER TABLE businesses ADD COLUMN current_version INTEGER")
     conn.commit()
     conn.close()
 
