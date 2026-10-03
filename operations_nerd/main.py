@@ -33,6 +33,9 @@ app.include_router(agentic_router)
 # /businesses or /packs/{pack_id}/questionnaire.
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 
+# Agentic CRM single-page app (login, spec-driven CRM, chat, history).
+app.mount("/app", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "frontend_app"), html=True), name="app")
+
 # Config-change agent demo: writes files into the repo's pack folders, so it
 # is only mounted when explicitly enabled -- off by default, never on a
 # deployed server.
