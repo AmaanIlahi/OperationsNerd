@@ -80,7 +80,11 @@ Stored as JSON in the database, one row per version.
 | `update_field` (label, options, required) | "Add 'Student' to membership types" |
 | `change_field_type` | "Trial days should be a number" |
 | `archive_field` / `restore_field` | "Remove fax" |
-| `add_link` / `archive_link` | "Members belong to a location" |
+| `add_link` / `archive_link` / `restore_link` | "Members belong to a location" |
+
+- `change_field_type` changes the spec only. Stored values are never rewritten; values that do not fit the new type are kept and reported as `invalid_fields` when the record is read.
+- Archiving an entity type also archives its active links, each tagged `archived_by` with that entity's key. Restoring the entity restores exactly those links (a link whose other end is still archived waits for it). Links archived on their own are never auto-restored.
+- Within one proposal, an operation may carry a throwaway `ref` so later operations can refer to what it creates. Refs are not keys, may not look like keys, and exist only for that proposal.
 
 Initial setup is the same mechanism: the agent proposes a list of `create_entity_type`, `add_field`, and `add_link` operations against an empty spec.
 
@@ -119,7 +123,9 @@ POST /api/businesses/{id}/revert   { to_version } -> applies a new version equal
 
 - A proposal is refused on approve if the spec changed since it was made.
 - Operations that fail validation are dropped from the proposal and listed with the reason, so the owner sees what the agent tried and why it was refused.
-- Model and API key come from env vars (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`). Add Anthropic as a provider behind the existing `call_llm` interface so the provider stays swappable.
+- Model and API key come from env vars (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`). The Anthropic provider lives in `agentic/anthropic_llm.py` (not `pipeline/`, which stays untouched). It has the same call shape as `call_llm(prompt, response_schema)` plus `call_structured(system, messages, schema)`, which also returns token usage and latency for the audit trail.
+- Caps: 40 messages per request, 4,000 characters per message, 50 operations per proposal.
+- Proposal statuses: `pending`, `no_changes`, `approved`, `rejected`, `stale`.
 
 ## Industry templates
 
@@ -144,6 +150,8 @@ proposals       (id, business_id, base_version, messages_json, reply, ops_json, 
 
 - `businesses` gains a `current_version` column (additive, nullable). `owner_key` from Phase 1 holds the account id.
 - Records reuse `entities` + `entity_attributes` from Phase 1. Attribute names are field **keys**, not labels.
+- Generic record endpoints: `POST/GET /api/businesses/{id}/records/{entity_key}`, `GET/PATCH .../records/{entity_key}/{record_id}`. Values are validated against the current spec; required is enforced on create and edit only.
+- `GET /api/businesses/{id}/versions/{n}` returns the full spec of one version (account-scoped).
 - `proposals` + `spec_versions` together are the audit trail (who asked, what was proposed, what was approved, tokens, latency).
 
 ## UI (one page, `/app`)
