@@ -1,3 +1,5 @@
+Superseded by agentic_crm_architecture.md.
+
 # Chat Onboarding — Architecture
 
 Status: approved plan, not yet built. Source of truth for the chat-onboarding module.
