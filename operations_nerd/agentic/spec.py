@@ -61,6 +61,9 @@ class SpecLink(BaseModel):
     to: str
     cardinality: Literal["one_to_one", "many_to_one", "one_to_many", "many_to_many"]
     archived: bool = False
+    # Set only when the link was archived as a side effect of archiving this
+    # entity type, so restoring the entity brings back exactly those links.
+    archived_by: Optional[str] = None
 
 
 class SpecBusiness(_Strict):

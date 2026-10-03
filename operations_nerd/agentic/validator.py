@@ -28,6 +28,17 @@ def _check_label(label: str, where: str, issues: list[str]):
         issues.append(f"{where}: label is longer than {MAX_LABEL_LENGTH} characters")
 
 
+def _duplicate_message(where: str, kind: str, first, second) -> str:
+    """Duplicate-label message. When exactly one of the two is archived, say
+    so and point at restoring it, since that is almost always what was meant."""
+    archived = first if first.archived and not second.archived else (
+        second if second.archived and not first.archived else None)
+    if archived is not None:
+        return (f"{where}: duplicate {kind} label -- an archived {kind} named '{archived.label}' "
+                f"already exists; restore it instead of creating a new one")
+    return f"{where}: duplicate {kind} label (another {kind} already uses this label)"
+
+
 def validate_spec(data) -> list[str]:
     if not isinstance(data, dict):
         return ["spec must be a JSON object"]
@@ -48,7 +59,7 @@ def validate_spec(data) -> list[str]:
             seen_keys[key] = where
 
     entities_by_key = {}
-    seen_entity_labels: dict[str, str] = {}
+    seen_entity_labels: dict[str, object] = {}
     for e in spec.entities:
         where = f"entity '{e.label}'"
         if not ENTITY_KEY_RE.match(e.key):
@@ -58,11 +69,11 @@ def validate_spec(data) -> list[str]:
         _check_label(e.label, where, issues)
         norm = _norm(e.label)
         if norm in seen_entity_labels:
-            issues.append(f"{where}: duplicate entity label (also used by '{seen_entity_labels[norm]}')")
-        seen_entity_labels.setdefault(norm, e.label)
+            issues.append(_duplicate_message(where, "entity", seen_entity_labels[norm], e))
+        seen_entity_labels.setdefault(norm, e)
 
         # Archived fields still count: restoring one must never create a duplicate.
-        seen_field_labels: dict[str, str] = {}
+        seen_field_labels: dict[str, object] = {}
         for f in e.fields:
             fwhere = f"field '{f.label}' on '{e.label}'"
             if not FIELD_KEY_RE.match(f.key):
@@ -71,8 +82,8 @@ def validate_spec(data) -> list[str]:
             _check_label(f.label, fwhere, issues)
             fnorm = _norm(f.label)
             if fnorm in seen_field_labels:
-                issues.append(f"{fwhere}: duplicate field label within this entity type")
-            seen_field_labels.setdefault(fnorm, f.label)
+                issues.append(_duplicate_message(fwhere, "field", seen_field_labels[fnorm], f))
+            seen_field_labels.setdefault(fnorm, f)
 
             if f.type in OPTION_TYPES:
                 if not f.options:
@@ -92,6 +103,8 @@ def validate_spec(data) -> list[str]:
             issues.append(f"{where}: key '{l.key}' must be l_ followed by lowercase letters, digits or underscores")
         claim(l.key, where)
         _check_label(l.label, where, issues)
+        if l.archived_by is not None and not (l.archived and l.archived_by in (l.from_, l.to)):
+            issues.append(f"{where}: archived_by must name one of the link's archived entity ends")
         for end_name, end_key in (("from", l.from_), ("to", l.to)):
             target = entities_by_key.get(end_key)
             if target is None:

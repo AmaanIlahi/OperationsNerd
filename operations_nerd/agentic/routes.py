@@ -9,11 +9,13 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from agentic import auth, store, template_store
+from agentic.routes_crm import router as crm_router
 from agentic.spec import empty_spec, rekey_spec
 from agentic.validator import validate_spec
 from db import db as d
 
 router = APIRouter(prefix="/api")
+router.include_router(crm_router)
 
 
 class SignupRequest(BaseModel):
