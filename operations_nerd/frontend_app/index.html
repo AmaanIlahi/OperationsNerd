@@ -352,6 +352,7 @@ async function selectBusiness(id) {
   remember('biz-' + S.account.id, String(id));
   S.tab = null; S.recs = null; S.form = null; S.history = null; S.view = 'crm';
   renderHeader();
+  await loadChatHistory();
   renderChat();
   await renderCrm();
 }
@@ -639,8 +640,56 @@ function renderSpec(spec) {
 
 // ---------- chat ----------
 
+// Rebuild the conversation from the saved proposals, so it survives a reload.
+// Each proposal stored the full message list it was asked with; a proposal
+// that extends the conversation so far continues it, anything else starts a
+// new conversation (the owner pressed "New conversation").
+async function loadChatHistory() {
+  const bid = S.biz.id;
+  if (S.chats[bid] && S.chats[bid].busy) return;
+  const chat = { messages: [], busy: false, error: null, errorStatus: null };
+  try {
+    chat.messages = rebuildConversation(await api('GET', `/businesses/${bid}/proposals`));
+  } catch (e) {
+    chat.error = 'Could not load the earlier conversation: ' + e.message;
+  }
+  S.chats[bid] = chat;
+}
+
+function rebuildConversation(rows) {
+  const norm = c => (c === '(no reply)' ? '' : c);
+  let conv = [];
+  for (const row of rows) {
+    const msgs = row.messages;
+    const continues = conv.length <= msgs.length
+      && conv.every((m, i) => m.role === msgs[i].role && norm(m.content) === norm(msgs[i].content));
+    if (continues) {
+      for (let i = conv.length; i < msgs.length; i++) conv.push({ role: msgs[i].role, content: msgs[i].content });
+    } else {
+      conv = msgs.map(m => ({ role: m.role, content: m.content }));
+    }
+    conv.push({ role: 'assistant', content: row.reply && row.reply.trim() ? row.reply : '(no reply)', proposal: toCard(row) });
+  }
+  return conv;
+}
+
+// A saved proposal in the shape the proposal card expects.
+function toCard(row) {
+  const outdated = row.status === 'pending' && row.base_version !== S.biz.current_version;
+  return {
+    proposal_id: row.id,
+    status: outdated ? 'stale' : row.status,
+    base_version: row.base_version,
+    reply: row.reply,
+    // impact is saved in the same order as the applied operations
+    operations: row.operations.map((op, i) => ({ index: row.impact[i] ? row.impact[i].index : i, op, description: String(op.op) })),
+    rejected_operations: row.rejected_operations,
+    impact: row.impact,
+  };
+}
+
 function chatState() {
-  return S.chats[S.biz.id] || (S.chats[S.biz.id] = { messages: [], busy: false, error: null });
+  return S.chats[S.biz.id] || (S.chats[S.biz.id] = { messages: [], busy: false, error: null, errorStatus: null });
 }
 
 function renderChat() {
@@ -656,7 +705,7 @@ function renderChat() {
     chat.busy ? el('div', { class: 'msg' }, el('div', { class: 'bubble' }, el('span', { class: 'spinner' }), el('span', { id: 'wait-note', text: 'Thinking…' }))) : null);
   fill(shell.chatStatus, chat.error ? el('div', { class: 'error' },
     el('div', { text: chat.error }),
-    chat.messages.length && chat.messages[chat.messages.length - 1].role === 'user'
+    chat.errorStatus !== 429 && chat.messages.length && chat.messages[chat.messages.length - 1].role === 'user'
       ? el('button', { text: 'Try again', onclick: () => sendChat(true) }) : null) : null);
   shell.send.disabled = chat.busy;
   shell.messages.scrollTop = shell.messages.scrollHeight;
@@ -678,7 +727,7 @@ async function sendChat(retry) {
     chat.messages.push({ role: 'user', content: text });
     shell.input.value = '';
   }
-  chat.busy = true; chat.error = null;
+  chat.busy = true; chat.error = null; chat.errorStatus = null;
   renderChat();
   const slow = setTimeout(() => { const n = document.getElementById('wait-note'); if (n) n.textContent = 'Still working… this can take up to a minute.'; }, 12000);
   try {
@@ -686,8 +735,8 @@ async function sendChat(retry) {
     const p = await api('POST', `/businesses/${bid}/chat`, { messages: history }, 120000);
     chat.messages.push({ role: 'assistant', content: p.reply && p.reply.trim() ? p.reply : '(no reply)', proposal: p });
   } catch (e) {
-    chat.error = e.status === 502 ? 'The assistant could not answer right now. ' + e.message
-      : e.status === 0 ? e.message : e.message;
+    chat.errorStatus = e.status;
+    chat.error = e.status === 502 ? 'The assistant could not answer right now. ' + e.message : e.message;
   } finally {
     clearTimeout(slow);
     chat.busy = false;

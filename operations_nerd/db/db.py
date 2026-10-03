@@ -13,7 +13,7 @@ import json
 import os
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "operations_nerd.db")
+DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.path.dirname(__file__), "operations_nerd.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 

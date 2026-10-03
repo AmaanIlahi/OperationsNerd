@@ -191,6 +191,58 @@ def set_proposal_status(conn, proposal_id: int, from_status: str, to_status: str
     return cur.rowcount == 1
 
 
+def list_proposals(conn, account_id: int, business_id: int, limit: int = 30) -> list[dict] | None:
+    """The business's most recent proposals, oldest first (newest last).
+    None if the account does not own the business."""
+    if not _owned_business_row(conn, account_id, business_id):
+        return None
+    rows = conn.execute(
+        "SELECT * FROM proposals WHERE business_id = ? ORDER BY id DESC LIMIT ?",
+        (business_id, limit),
+    ).fetchall()
+    out = []
+    for r in reversed(rows):
+        p = _proposal_dict(r)
+        p["messages"] = json.loads(r["messages_json"])
+        out.append(p)
+    return out
+
+
+# ---------- daily chat cap ----------
+
+def _today() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def reserve_chat_turn(conn, account_id: int, daily_limit: int) -> bool:
+    """Counts one assistant turn against today's cap, atomically. False if the
+    cap is already reached."""
+    conn.execute(
+        "INSERT OR IGNORE INTO chat_usage (account_id, day, turns) VALUES (?, ?, 0)",
+        (account_id, _today()),
+    )
+    cur = conn.execute(
+        "UPDATE chat_usage SET turns = turns + 1 WHERE account_id = ? AND day = ? AND turns < ?",
+        (account_id, _today(), daily_limit),
+    )
+    return cur.rowcount == 1
+
+
+def refund_chat_turn(conn, account_id: int):
+    conn.execute(
+        "UPDATE chat_usage SET turns = MAX(turns - 1, 0) WHERE account_id = ? AND day = ?",
+        (account_id, _today()),
+    )
+
+
+def chat_turns_today(conn, account_id: int) -> int:
+    row = conn.execute(
+        "SELECT turns FROM chat_usage WHERE account_id = ? AND day = ?", (account_id, _today())
+    ).fetchone()
+    return row["turns"] if row else 0
+
+
 def recent_rejections(conn, business_id: int, limit: int = 3) -> list[dict]:
     """Operations refused in the business's latest proposals, with reasons,
     shown to the agent next turn so it can correct itself."""

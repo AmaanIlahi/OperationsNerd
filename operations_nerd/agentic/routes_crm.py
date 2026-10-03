@@ -64,6 +64,16 @@ def revert(business_id: int, payload: RevertRequest, request: Request):
 
 # ---------- agent turn ----------
 
+@router.get("/businesses/{business_id}/proposals")
+def list_proposals(business_id: int, request: Request, limit: int = 30):
+    account = auth.current_account(request)
+    with d.get_conn() as conn:
+        found = store.list_proposals(conn, account["id"], business_id, max(1, min(limit, 100)))
+    if found is None:
+        raise HTTPException(status_code=404, detail="Business not found")
+    return found
+
+
 @router.post("/businesses/{business_id}/chat")
 def chat_turn(business_id: int, payload: ChatRequest, request: Request):
     account = auth.current_account(request)

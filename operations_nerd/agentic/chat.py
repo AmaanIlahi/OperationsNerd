@@ -16,7 +16,7 @@ else as JSON inside the system prompt, which tells the model to treat it so.
 import copy
 import json
 
-from agentic import store, template_store
+from agentic import config, store, template_store
 from agentic.anthropic_llm import call_structured, LLMError
 from agentic.impact import compute_impacts
 from agentic.operations import (
@@ -193,11 +193,22 @@ def chat(account_id: int, business_id: int, messages: list[dict]) -> dict:
     spec, base_version = business["spec"], business["current_version"]
     template = template_store.get_template(business["template"]) if business["template"] else None
 
+    # Count the turn before spending anything; committed on its own so a
+    # failure later cannot un-count a call that may have cost money.
+    limit = config.chat_daily_limit()
+    with d.get_conn() as conn:
+        reserved = store.reserve_chat_turn(conn, account_id, limit)
+    if not reserved:
+        raise ChangeError(429, f"You have used all {limit} assistant messages for today. "
+                               f"The limit resets at 00:00 UTC.")
+
     system = build_system_prompt(spec, template, rejections)
     try:
         result = run_llm(system, [{"role": m["role"], "content": m["content"]} for m in messages],
                          RESPONSE_SCHEMA)
     except LLMError as e:
+        with d.get_conn() as conn:          # the provider did not answer: give the turn back
+            store.refund_chat_turn(conn, account_id)
         raise ChangeError(502, f"The assistant is unavailable: {e}")
     reply, raw_ops = _parse_model_output(result.text)
 

@@ -16,6 +16,7 @@ from db import db as d
 from main import app
 
 os.environ["SIGNUP_INVITE_CODE"] = "let-me-in"
+os.environ["RATE_LIMIT_ENABLED"] = "0"
 d.init_db(reset=True)
 
 PASSWORD = "correct horse battery"

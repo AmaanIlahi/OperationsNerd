@@ -179,6 +179,14 @@ CREATE TABLE IF NOT EXISTS proposals (
     decided_at          TEXT
 );
 
+-- Assistant turns used per account per UTC day (cost control).
+CREATE TABLE IF NOT EXISTS chat_usage (
+    account_id      INTEGER NOT NULL REFERENCES accounts(id),
+    day             TEXT NOT NULL,
+    turns           INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, day)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
 CREATE INDEX IF NOT EXISTS idx_spec_versions_business ON spec_versions(business_id, version);
 CREATE INDEX IF NOT EXISTS idx_proposals_business ON proposals(business_id);

@@ -1,0 +1,26 @@
+# secrets and data must never enter the image
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*-wal
+*-shm
+*.sqlite3
+backups/
+
+# not needed at runtime
+.git
+.gitignore
+.vscode
+tests
+**/tests
+documentation
+espocrm-benchmark
+**/venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+Dockerfile
+.dockerignore

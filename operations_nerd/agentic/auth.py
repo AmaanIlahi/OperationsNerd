@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from fastapi import Depends, HTTPException, Request, Response
 
+from agentic import config
 from db import db as d
 
 logger = logging.getLogger(__name__)
@@ -132,13 +133,50 @@ def _is_local(request: Request) -> bool:
     return (request.url.hostname or "") in LOCAL_HOSTS
 
 
+def _peer(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def effective_scheme(request: Request) -> str:
+    """http or https as the browser saw it. When TLS is ended by a platform
+    proxy the app itself only sees http, so X-Forwarded-Proto is honoured --
+    but only when the connection really comes from a trusted proxy
+    (TRUSTED_PROXIES); from anyone else the header is ignored."""
+    forwarded = request.headers.get("x-forwarded-proto")
+    if forwarded and config.is_trusted_proxy(_peer(request)):
+        return forwarded.split(",")[0].strip().lower()
+    return request.url.scheme
+
+
+def is_secure_request(request: Request) -> bool:
+    """Whether the session cookie gets the Secure flag: always in production,
+    whenever the browser is on https, and otherwise whenever this is not a
+    local address."""
+    return config.is_production() or effective_scheme(request) == "https" or not _is_local(request)
+
+
+def client_ip(request: Request) -> str:
+    """The caller's address for rate limiting. Behind a trusted proxy that is
+    the right-most X-Forwarded-For entry that is not itself a trusted proxy
+    (the proxy appends the real client there); otherwise the socket peer."""
+    peer = _peer(request) or "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if not forwarded or not config.is_trusted_proxy(peer):
+        return peer
+    for candidate in reversed([p.strip() for p in forwarded.split(",") if p.strip()]):
+        trust_all, _ = config.trusted_proxies()
+        if trust_all or not config.is_trusted_proxy(candidate):
+            return candidate
+    return peer
+
+
 def set_session_cookie(request: Request, response: Response, token: str):
     response.set_cookie(
         SESSION_COOKIE, token,
         max_age=SESSION_DAYS * 24 * 3600,
         httponly=True,
         samesite="lax",
-        secure=not _is_local(request),
+        secure=is_secure_request(request),
         path="/",
     )
 
@@ -146,7 +184,7 @@ def set_session_cookie(request: Request, response: Response, token: str):
 def clear_session_cookie(request: Request, response: Response):
     response.delete_cookie(
         SESSION_COOKIE, path="/", httponly=True, samesite="lax",
-        secure=not _is_local(request),
+        secure=is_secure_request(request),
     )
 
 

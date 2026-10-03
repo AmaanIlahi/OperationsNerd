@@ -21,6 +21,7 @@ from agentic.spec import rekey_spec, empty_spec
 from agentic.validator import validate_spec
 
 os.environ["SIGNUP_INVITE_CODE"] = "let-me-in"
+os.environ["RATE_LIMIT_ENABLED"] = "0"
 d.init_db(reset=True)
 
 PASSWORD = "correct horse battery"

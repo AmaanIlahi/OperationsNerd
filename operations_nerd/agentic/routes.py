@@ -8,7 +8,7 @@ business lookup is scoped to that account (404 otherwise).
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from agentic import auth, store, template_store
+from agentic import auth, limits, store, template_store
 from agentic.routes_crm import router as crm_router
 from agentic.spec import empty_spec, rekey_spec
 from agentic.validator import validate_spec
@@ -38,6 +38,7 @@ class CreateBusinessRequest(BaseModel):
 
 @router.post("/auth/signup", status_code=201)
 def signup(payload: SignupRequest, request: Request, response: Response):
+    limits.check_signup(auth.client_ip(request), auth.normalize_email(payload.email))
     if not auth.invite_code_ok(payload.invite_code):
         raise HTTPException(status_code=403, detail="Invalid invite code")
     email = auth.normalize_email(payload.email)
@@ -61,11 +62,14 @@ def signup(payload: SignupRequest, request: Request, response: Response):
 @router.post("/auth/login")
 def login(payload: LoginRequest, request: Request, response: Response):
     email = auth.normalize_email(payload.email)
+    limits.check_login(auth.client_ip(request), email)
     with d.get_conn() as conn:
         account = store.get_account_by_email(conn, email)
         ok = auth.verify_password(payload.password, account["password_hash"] if account else None)
         if not ok:
+            limits.login_failed(email)
             raise HTTPException(status_code=401, detail="Wrong email or password")
+        limits.login_succeeded(email)
         token = auth.create_session(conn, account["id"])
     auth.set_session_cookie(request, response, token)
     return {"id": account["id"], "email": account["email"]}

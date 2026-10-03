@@ -20,6 +20,11 @@ from state.routes import router as state_router
 from pipeline.routes import router as pipeline_router
 from approval.routes import router as approval_router
 from agentic.routes import router as agentic_router
+from agentic.health import router as health_router
+from agentic.middleware import BodyLimitMiddleware
+from agentic import config as agentic_config
+
+agentic_config.startup()      # refuses to start on a bad production config; creates the DB if missing
 
 app = FastAPI(title="Operations Nerd")
 
@@ -28,6 +33,8 @@ app.include_router(state_router)
 app.include_router(pipeline_router)
 app.include_router(approval_router)
 app.include_router(agentic_router)
+app.include_router(health_router)
+app.add_middleware(BodyLimitMiddleware)
 
 # Mounted at /ui, not /, so it never conflicts with API routes like
 # /businesses or /packs/{pack_id}/questionnaire.
