@@ -99,8 +99,13 @@ def process_event(conn, pack: Pack, event_id: int) -> dict:
     extraction_schema = _build_extraction_schema(schema.extract_fields, usable_action_types)
     raw_extraction = call_llm(extraction_prompt, response_schema=extraction_schema)
 
-    parsed = json.loads(raw_extraction)
-    action_type = parsed["action_type"]
+    try:
+        parsed = json.loads(raw_extraction)
+        action_type = parsed["action_type"]
+    except (ValueError, TypeError, KeyError) as e:
+        raise PipelineError(f"The model's extraction reply was not usable ({type(e).__name__}); nothing was drafted.")
+    if action_type not in usable_action_types:
+        raise PipelineError(f"The model chose action_type {action_type!r}, which this pack does not allow.")
 
     d.mark_event_processed(conn, event_id, parsed_data=parsed)
 
