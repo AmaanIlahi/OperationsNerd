@@ -109,3 +109,24 @@ CREATE INDEX IF NOT EXISTS idx_follow_ups_business ON follow_ups(business_id);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_contact ON follow_ups(contact_id);
 CREATE INDEX IF NOT EXISTS idx_events_business ON events(business_id);
 CREATE INDEX IF NOT EXISTS idx_drafted_actions_business ON drafted_actions(business_id);
+
+-- Audit trail: every pipeline failure and every approval decision, so a
+-- pack's failures are visible (the "falsifiability log") and decisions can be reviewed.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER,
+    event_id    INTEGER,
+    action_id   INTEGER,
+    kind        TEXT NOT NULL,   -- pipeline_error | action_drafted | approved | rejected | auto_approved | edited_approved
+    detail      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_business ON audit_log(business_id, id);
+
+-- What a human changed before approving, or why they said no.
+CREATE TABLE IF NOT EXISTS action_reviews (
+    action_id     INTEGER PRIMARY KEY REFERENCES drafted_actions(id),
+    original_body TEXT,
+    edited_body   TEXT,
+    reason        TEXT
+);

@@ -17,13 +17,34 @@ from questionnaire.routes import router as questionnaire_router
 from state.routes import router as state_router
 from pipeline.routes import router as pipeline_router
 from approval.routes import router as approval_router
+from insights.routes import router as insights_router
 
 app = FastAPI(title="Operations Nerd")
+
+import os as _os
+from fastapi import Request as _Request
+from fastapi.responses import JSONResponse as _JSONResponse
+import hmac as _hmac
+
+
+@app.middleware("http")
+async def _api_key_gate(request: _Request, call_next):
+    """Optional shared-key auth. Off unless OPERATIONS_API_KEY is set, so local use is unchanged.
+    The UI, docs and signed webhooks stay open (webhooks carry their own HMAC signature)."""
+    key = _os.environ.get("OPERATIONS_API_KEY", "")
+    path = request.url.path
+    open_path = path == "/" or path.startswith(("/ui", "/docs", "/openapi.json", "/redoc", "/webhooks/"))
+    if key and not open_path:
+        sent = request.headers.get("X-API-Key", "")
+        if not _hmac.compare_digest(sent.encode(), key.encode()):
+            return _JSONResponse({"detail": "Missing or wrong X-API-Key"}, status_code=401)
+    return await call_next(request)
 
 app.include_router(questionnaire_router)
 app.include_router(state_router)
 app.include_router(pipeline_router)
 app.include_router(approval_router)
+app.include_router(insights_router)
 
 # Mounted at /ui, not /, so it never conflicts with API routes like
 # /businesses or /packs/{pack_id}/questionnaire.

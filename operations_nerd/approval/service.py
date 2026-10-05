@@ -20,6 +20,17 @@ class ApprovalError(Exception):
     pass
 
 
+def _audit(conn, kind, action):
+    # Recording a decision must never block the decision itself.
+    try:
+        conn.execute(
+            "INSERT INTO audit_log (business_id, event_id, action_id, kind, detail) VALUES (?, ?, ?, ?, ?)",
+            (action["business_id"], action["event_id"], action["id"], kind, action["action_type"]),
+        )
+    except Exception:
+        _log.warning("audit log write failed for action %s", action.get("id"))
+
+
 def _simulated_send(action: dict):
     """Dummy send for this POC. No real delivery, this is confirmed scope.
     Logs at INFO so sends are visible in uvicorn's structured logs."""
@@ -42,6 +53,7 @@ def approve_and_send(conn, action_id: int) -> dict:
     action["status"] = "approved"
     _simulated_send(action)
     d.set_action_status(conn, action_id, "sent")
+    _audit(conn, "approved", action)
 
     return d.get_drafted_action(conn, action_id)
 
@@ -57,6 +69,7 @@ def reject_action(conn, action_id: int) -> dict:
 
     # Human decision: mark the moment a person said no.
     d.set_action_status(conn, action_id, "rejected", decided_at=True)
+    _audit(conn, "rejected", action)
 
     return d.get_drafted_action(conn, action_id)
 
@@ -73,5 +86,6 @@ def maybe_auto_approve(conn, action_id: int) -> dict | None:
     action["status"] = "auto_approved"
     _simulated_send(action)
     d.set_action_status(conn, action_id, "sent", decided_at=False)
+    _audit(conn, "auto_approved", action)
 
     return d.get_drafted_action(conn, action_id)

@@ -47,6 +47,13 @@ def create_event(payload: CreateEventRequest):
         try:
             result = process_event(conn, pack, event_id)
         except PipelineError as e:
+            # Keep the failure (and the event) so it shows in /audit instead of vanishing with the rollback.
+            conn.commit()
+            conn.execute(
+                "INSERT INTO audit_log (business_id, event_id, kind, detail) VALUES (?, ?, 'pipeline_error', ?)",
+                (payload.business_id, event_id, str(e)[:2000]),
+            )
+            conn.commit()
             raise HTTPException(status_code=422, detail=str(e))
 
     return {"event_id": event_id, "drafted_action": result}
