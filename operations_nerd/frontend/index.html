@@ -220,6 +220,45 @@ input[type=text], input[type=number], select { width: 100%; min-height: 44px; pa
   body, .review { background: #FFFFFF !important; }
   * { color: #1D1D1B !important; }
 }
+
+/* ---------- refresh: softer surfaces, deeper accent, richer cards ---------- */
+:root { --radius: 10px; --accent: #3B4FD8; --page: #F6F7FB; --line: #E6E8F0; --line-strong: #D5D9E6; --raised: #EEF0F8; --shadow: 0 1px 2px rgba(20,24,60,.05), 0 8px 24px rgba(20,24,60,.06); }
+[data-theme="dark"] { --accent: #8A9BFF; --page: #12131A; --panel: #1A1C26; --raised: #242736; --line: #2B2E3F; --line-strong: #3A3E55; }
+body { background: radial-gradient(1200px 500px at 85% -10%, rgba(59,79,216,.07), transparent 60%), var(--page); }
+.nav { background: transparent; backdrop-filter: blur(6px); }
+.brand rect { fill: var(--accent); }
+[data-theme="dark"] .brand rect { fill: var(--accent); }
+.nav-link.active { background: var(--panel); box-shadow: 0 1px 2px rgba(20,24,60,.08); }
+.nav-link.active::before { background: var(--accent); }
+.review { border-radius: 14px; box-shadow: var(--shadow); transition: transform .15s ease, box-shadow .15s ease; }
+.review:hover { transform: translateY(-1px); }
+.btn { border-radius: 999px; text-decoration: none; color: inherit; }
+.btn.primary { color: var(--accent-text); }
+.btn.primary { background: linear-gradient(180deg, var(--accent), #2E3FB8); box-shadow: 0 2px 8px rgba(59,79,216,.3); }
+.btn.sm { min-height: 32px; padding: 4px 12px; font-size: calc(13px * var(--font-scale)); }
+.btn.danger { color: var(--red); }
+.main { max-width: 1040px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: calc(12px * var(--font-scale)); font-weight: 600; background: var(--raised); color: var(--text-2); }
+.chip.warn { background: var(--amber-bg); color: var(--amber); }
+textarea.edit { width: 100%; min-height: 120px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--page); line-height: 1.55; resize: vertical; font: inherit; color: inherit; }
+.reject-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.reject-row input { flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel); }
+.bulkbar { display: flex; align-items: center; gap: 10px; margin: -12px 0 20px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin: 18px 0 8px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); }
+.tile .num { font-size: calc(30px * var(--font-scale)); font-weight: 650; letter-spacing: -0.03em; line-height: 1.1; }
+.tile .cap { color: var(--text-3); font-size: calc(13px * var(--font-scale)); margin-top: 4px; }
+.tile.accent .num { color: var(--accent); }
+.bars { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.bar { display: grid; grid-template-columns: 190px 1fr 60px; align-items: center; gap: 12px; padding: 6px 0; font-size: calc(14px * var(--font-scale)); }
+.bar .track { height: 10px; border-radius: 999px; background: var(--raised); overflow: hidden; display: flex; }
+.bar .fill { background: var(--accent); } .bar .fill.rej { background: var(--red); }
+.auditlist { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.auditrow { display: grid; grid-template-columns: 150px 150px 1fr; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line); font-size: calc(14px * var(--font-scale)); }
+.auditrow:first-child { border-top: none; }
+.auditrow .k { font-weight: 600; } .auditrow .k.pipeline_error, .auditrow .k.rejected { color: var(--red); } .auditrow .k.approved, .auditrow .k.edited_approved { color: var(--green); }
+.toolrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+@media (max-width: 700px) { .bar { grid-template-columns: 110px 1fr 44px; } .auditrow { grid-template-columns: 1fr; gap: 2px; } }
 </style>
 </head>
 <body>
@@ -251,6 +290,23 @@ input[type=text], input[type=number], select { width: 100%; min-height: 44px; pa
       <div class="view-head"><h1>Needs review</h1></div>
       <p class="summary" id="summaryLine"></p>
       <div id="draftedActionsTable"></div>
+    </section>
+
+    <!-- Insights -->
+    <section id="view-insights" data-view="insights" hidden>
+      <div class="view-head"><h1>Insights</h1></div>
+      <p class="lede">How the assistant is doing, and a record of every decision and failure.</p>
+      <div id="insightTiles"></div>
+      <h2 class="section-title">By action type</h2>
+      <div id="insightBars"></div>
+      <h2 class="section-title">Audit log</h2>
+      <p class="section-sub">Every approval, rejection, edit and pipeline failure.</p>
+      <div id="auditList"></div>
+      <div class="toolrow">
+        <a class="btn" id="exportLink" href="#" download="actions.csv">Export actions (CSV)</a>
+        <label class="btn" for="csvFile">Import contacts (CSV)</label><input type="file" id="csvFile" accept=".csv,text/csv" hidden>
+        <span class="muted small" id="importMsg"></span>
+      </div>
     </section>
 
     <!-- Activity -->
@@ -376,6 +432,7 @@ const ICONS = {
   queue: ['M4 6h16', 'M4 12h10', 'M4 18h7', 'M17 15l2 2 3-4'],
   activity: ['M3 12h4l3-8 4 16 3-8h4'],
   records: ['M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20', 'M10 4a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z', 'M20 20v-1.5a3.5 3.5 0 0 0-2.5-3.35', 'M15.5 4.3a3.5 3.5 0 0 1 0 6.4'],
+  insights: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
   settings: ['M4 7h10', 'M18 7h2', 'M4 17h4', 'M12 17h8', 'M16 5v4', 'M10 15v4'],
   chevron: ['M7 10l5 5 5-5'],
 };
@@ -488,6 +545,7 @@ const VIEWS = [
   { id: 'queue', label: 'Queue', icon: 'queue' },
   { id: 'activity', label: 'Activity', icon: 'activity' },
   { id: 'records', label: 'Contacts', icon: 'records' },
+  { id: 'insights', label: 'Insights', icon: 'insights' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
 function buildNav() {
@@ -505,6 +563,7 @@ function showView(id) {
   document.querySelectorAll('[data-view]').forEach(s => { s.hidden = s.dataset.view !== id; });
   document.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === id));
   $('cancelSetupBtn').hidden = !businessId;
+  if (id === 'insights') loadInsights();
   window.scrollTo(0, 0);
 }
 function setBadges(pending) {
@@ -784,6 +843,7 @@ async function fetchState() {
   const json = JSON.stringify(state);
   if (json === lastJson) return;   // nothing changed, keep the page still
   render(state);
+  if (view === 'insights') loadInsights();
   prevState = state;
   lastJson = json;
 }
@@ -829,6 +889,51 @@ function renderSummary(state, pending) {
   ]);
 }
 
+function waitChip(action) {
+  const t = parseTs(action.created_at);
+  if (!t) return null;
+  const mins = Math.round((Date.now() - t.getTime()) / 60000);
+  if (mins < 60) return null;
+  return el('span', { className: 'chip warn', text: `Waiting ${mins >= 1440 ? Math.floor(mins / 1440) + 'd' : Math.floor(mins / 60) + 'h'}`, attrs: { style: 'margin-right:10px' } });
+}
+
+// Approve, edit before approving, or reject with a reason.
+function decideRow(action, body) {
+  const holder = el('div');
+  const main = () => el('div', { className: 'decide', children: [
+    el('button', { className: 'btn primary', text: 'Approve & send', on: { click: () => approveAction(action.id) } }),
+    body != null ? el('button', { className: 'btn', text: 'Edit first', on: { click: editMode } }) : null,
+    el('button', { className: 'btn danger', text: 'Reject', on: { click: rejectMode } }),
+    el('span', { className: 'note', text: 'Sending is simulated in this prototype.' }),
+  ]});
+  function editMode() {
+    const ta = el('textarea', { className: 'edit', text: body, attrs: { 'aria-label': 'Edit the draft' } });
+    setChildren(holder, [ta, el('div', { className: 'decide', children: [
+      el('button', { className: 'btn primary', text: 'Save & send', on: { click: async () => {
+        const r = await fetch(`/drafted-actions/${action.id}/edit-approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: ta.value }) });
+        if (!r.ok) { ta.style.borderColor = 'var(--red)'; return; }
+        fetchState();
+      } } }),
+      el('button', { className: 'btn quiet', text: 'Cancel', on: { click: () => setChildren(holder, [main()]) } }),
+    ]})]);
+    ta.focus();
+  }
+  function rejectMode() {
+    const inp = el('input', { attrs: { type: 'text', placeholder: 'Why? (optional, helps spot patterns)', 'aria-label': 'Reason for rejecting' } });
+    const go = async () => {
+      await fetch(`/drafted-actions/${action.id}/reject-with-reason`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: inp.value }) });
+      fetchState();
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    setChildren(holder, [el('div', { className: 'reject-row', children: [inp,
+      el('button', { className: 'btn danger', text: 'Reject', on: { click: go } }),
+      el('button', { className: 'btn quiet', text: 'Cancel', on: { click: () => setChildren(holder, [main()]) } })] })]);
+    inp.focus();
+  }
+  setChildren(holder, [main()]);
+  return holder;
+}
+
 function reviewItem(state, action, diff) {
   const event = state.events.find(e => e.id === action.event_id);
   const who = contactName(state, action.contact_id);
@@ -842,7 +947,7 @@ function reviewItem(state, action, diff) {
     el('div', { className: 'eyebrow', text: 'Waiting for your approval' }),
     el('div', { className: 'review-head', children: [
       el('h2', { text: sentence(action.action_type) + (who ? ` for ${who}` : '') }),
-      event ? timeEl(event.received_at) : null,
+      el('span', { children: [waitChip(action), event ? timeEl(event.received_at) : null] }),
     ]}),
     el('div', { className: 'meta', text: event ? (who ? `Drafted from ${who}\u2019s ${words(event.source)}` : `Drafted from ${/^[aeiou]/i.test(words(event.source)) ? 'an' : 'a'} ${words(event.source)}`) : 'Drafted by the system' }),
     event ? el('div', { className: 'block', children: [
@@ -859,11 +964,7 @@ function reviewItem(state, action, diff) {
       el('div', { className: 'label', text: 'Why this was drafted' }),
       el('div', { className: 'why', children: reasons.map(([k, v]) => el('span', { children: [el('span', { className: 'k', text: sentence(k.replace(/_ref$/, '')) }), String(settingValue(k, v))] })) }),
     ]}) : null,
-    el('div', { className: 'decide', children: [
-      el('button', { className: 'btn primary', text: 'Approve & send', on: { click: () => approveAction(action.id) } }),
-      el('button', { className: 'btn', text: 'Reject', on: { click: () => rejectAction(action.id) } }),
-      el('span', { className: 'note', text: 'Sending is simulated in this prototype.' }),
-    ]}),
+    decideRow(action, body),
     techDetails(`action-${action.id}`, { action, event: event || null }),
   ]});
 }
@@ -875,7 +976,10 @@ function renderQueue(state, prevRows) {
   const handled = state.drafted_actions.filter(a => a.status !== 'pending_approval').sort((a, b) => b.id - a.id);
 
   const parts = pending.length
-    ? pending.map(a => reviewItem(state, a, diff))
+    ? [pending.length > 1 ? el('div', { className: 'bulkbar', children: [
+        el('button', { className: 'btn sm', text: `Approve all ${pending.length}`, on: { click: () => { if (confirm(`Approve and send all ${pending.length} drafts?`)) approveAll(pending.map(a => a.id)); } } }),
+        el('span', { className: 'muted small', text: 'or review them one by one below' })] }) : null,
+      ...pending.map(a => reviewItem(state, a, diff))]
     : [el('div', { className: 'empty', children: [el('strong', { text: 'You\u2019re all caught up.' }), 'New drafts show up here as messages come in.'] })];
 
   if (handled.length) {
@@ -987,6 +1091,51 @@ function renderSettings(state) {
     ].map(([k, v]) => el('div', { children: [el('dt', { text: k }), el('dd', { text: v, attrs: { style: 'font-family:var(--mono);font-size:calc(13px * var(--font-scale))' } })] })) }),
     techDetails('business-raw', b),
   ]);
+}
+
+// ---------- insights ----------
+
+async function loadInsights() {
+  if (!businessId) return;
+  const [st, au] = await Promise.all([
+    fetch(`/businesses/${businessId}/stats`).then(r => r.json()),
+    fetch(`/businesses/${businessId}/audit?limit=30`).then(r => r.json()),
+  ]);
+  const pct = (v) => v == null ? '\u2014' : Math.round(v * 100) + '%';
+  const tile = (num, cap, cls = '') => el('div', { className: 'tile ' + cls, children: [el('div', { className: 'num', text: num }), el('div', { className: 'cap', text: cap })] });
+  setChildren($('insightTiles'), [el('div', { className: 'tiles', children: [
+    tile(st.events, 'Messages received'),
+    tile(st.drafted_actions, 'Drafts made', 'accent'),
+    tile(st.by_status.sent || 0, 'Sent'),
+    tile(pct(st.rejection_rate), 'Rejected by you'),
+    tile(pct(st.edit_rate), 'Edited before sending'),
+    tile(st.pipeline_errors, 'Pipeline failures'),
+  ]})]);
+  const types = Object.entries(st.by_action_type);
+  setChildren($('insightBars'), [el('div', { className: 'bars', children: types.length ? types.map(([k, v]) => el('div', { className: 'bar', children: [
+    el('span', { text: sentence(k) }),
+    el('span', { className: 'track', children: [el('span', { className: 'fill', attrs: { style: `width:${(v.sent / v.drafted) * 100}%` } }), el('span', { className: 'fill rej', attrs: { style: `width:${(v.rejected / v.drafted) * 100}%` } })] }),
+    el('span', { className: 'muted small', text: `${v.sent}/${v.drafted}` }),
+  ]})) : [el('div', { className: 'muted', text: 'Nothing drafted yet.' })] })]);
+  setChildren($('auditList'), [el('div', { className: 'auditlist', children: au.length ? au.map(a => el('div', { className: 'auditrow', children: [
+    el('span', { className: 'k ' + a.kind, text: sentence(a.kind) }),
+    el('span', { className: 'muted', text: (parseTs(a.created_at) || new Date()).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }),
+    el('span', { text: a.detail ? sentence(a.detail) : '' }),
+  ]})) : [el('div', { className: 'auditrow muted', text: 'No decisions recorded yet.' })] })]);
+  $('exportLink').href = `/businesses/${businessId}/export.csv`;
+}
+$('csvFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f || !businessId) return;
+  const r = await fetch(`/businesses/${businessId}/contacts/import`, { method: 'POST', body: await f.text() });
+  const j = await r.json();
+  $('importMsg').textContent = r.ok ? `Added ${j.added}, skipped ${j.duplicates_skipped} duplicates${j.rejected.length ? ', ' + j.rejected.length + ' rows had problems' : ''}.` : (j.detail || 'Import failed');
+  e.target.value = '';
+  fetchState();
+});
+
+async function approveAll(ids) {
+  await fetch('/drafted-actions/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, decision: 'approve' }) });
+  fetchState();
 }
 
 // ---------- approve / reject ----------
