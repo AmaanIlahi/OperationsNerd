@@ -1,0 +1,47 @@
+[
+    {
+        "rows": [
+            [
+                {
+                    "name": "name"
+                },
+                {
+                    "name": "accounts"
+                }
+            ],
+            [
+                {
+                    "name": "emailAddress"
+                },
+                {
+                    "name": "phoneNumber"
+                }
+            ],
+            [
+                {
+                    "name": "address"
+                }
+            ],
+            [
+                {
+                    "name": "description"
+                }
+            ],
+            [
+                {
+                    "name": "cPreferredContactMethod"
+                },
+                {
+                    "name": "cPreferredLanguage"
+                }
+            ],
+            [
+                {
+                    "name": "cReferralSource"
+                }
+            ]
+        ],
+        "style": "default",
+        "label": ""
+    }
+]
