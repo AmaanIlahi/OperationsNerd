@@ -20,13 +20,29 @@ def verify_signature(raw: bytes, signature: str, secret: str | None = None) -> b
 
 def import_contacts_csv(conn, business_id: int, text: str) -> dict:
     """Columns: name, email, phone (header required). Skips rows whose email or phone already exists."""
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames or "name" not in [f.strip().lower() for f in reader.fieldnames]:
-        raise ValueError("CSV needs a header row with at least a 'name' column")
+    if not isinstance(text, str) or len(text) > 5000000:
+        raise ValueError("CSV must be text of at most 5000000 characters")
+    try:
+        reader = csv.reader(io.StringIO(text), strict=True)
+        raw_header = next(reader)
+        headers = [f.strip().lower() for f in raw_header]
+        if "name" not in headers or len(set(headers)) != len(headers) or any(not f for f in headers):
+            raise ValueError("CSV needs unique non-empty headers including name")
+        data = []
+        for n, cells in enumerate(reader, start=2):
+            if not cells or not any(c.strip() for c in cells):
+                continue
+            if len(cells) != len(headers):
+                raise ValueError(f"CSV row {n} does not match its header")
+            data.append((n, dict(zip(headers, cells))))
+            if len(data) > 10000:
+                raise ValueError("CSV accepts at most 10000 rows")
+    except (csv.Error, StopIteration):
+        raise ValueError("CSV is empty or malformed") from None
     seen_email = {(c["email"] or "").lower() for c in d.list_contacts(conn, business_id) if c.get("email")}
     seen_phone = {"".join(ch for ch in (c["phone"] or "") if ch.isdigit()) for c in d.list_contacts(conn, business_id) if c.get("phone")}
     added, skipped, bad = 0, 0, []
-    for n, row in enumerate(reader, start=2):
+    for n, row in data:
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         name, email, phone = row.get("name"), row.get("email", "").lower(), row.get("phone", "")
         digits = "".join(ch for ch in phone if ch.isdigit())

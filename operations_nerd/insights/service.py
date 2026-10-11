@@ -9,7 +9,7 @@ import io
 import json
 
 from db import db as d
-from approval.service import ApprovalError, _simulated_send
+from approval.service import ApprovalError, _simulated_send, _claim_pending
 
 
 def log(conn, kind: str, detail: str = "", business_id=None, event_id=None, action_id=None):
@@ -42,12 +42,13 @@ def edit_and_approve(conn, action_id: int, new_body: str) -> dict:
         raise ApprovalError(f"No drafted action with id {action_id}")
     if action["status"] != "pending_approval":
         raise ApprovalError(f"Drafted action {action_id} is not pending approval (current status: {action['status']})")
+    if not _claim_pending(conn, action_id, "approved", True):
+        raise ApprovalError("Another decision already claimed this action")
     original = _bodies(action)
     payload = dict(action["payload"] or {})
     payload["body"] = new_body
     conn.execute("UPDATE drafted_actions SET payload = ? WHERE id = ?", (json.dumps(payload), action_id))
     conn.execute("INSERT OR REPLACE INTO action_reviews (action_id, original_body, edited_body, reason) VALUES (?, ?, ?, NULL)", (action_id, original, new_body))
-    d.set_action_status(conn, action_id, "approved", decided_at=True)
     action["payload"] = payload
     action["status"] = "approved"
     _simulated_send(action)
@@ -105,13 +106,13 @@ def stats(conn, business_id: int) -> dict:
         by_status[r["status"]] = by_status.get(r["status"], 0) + 1
         t = by_type.setdefault(r["action_type"], {"drafted": 0, "sent": 0, "rejected": 0})
         t["drafted"] += 1
-        if r["status"] in ("sent", "approved", "auto_approved"):
+        if r["status"] == "sent":
             t["sent"] += 1
         if r["status"] == "rejected":
             t["rejected"] += 1
     for r in conn.execute("SELECT (julianday(decided_at) - julianday(created_at)) * 1440 AS m FROM drafted_actions WHERE business_id = ? AND decided_at IS NOT NULL", (business_id,)):
         waits.append(r["m"])
-    human = by_status.get("sent", 0) + by_status.get("rejected", 0) - by_status.get("auto_approved", 0)
+    auto = conn.execute("SELECT COUNT(DISTINCT action_id) FROM audit_log WHERE business_id=? AND kind='auto_approved'", (business_id,)).fetchone()[0]
     edited = conn.execute("SELECT COUNT(*) c FROM action_reviews ar JOIN drafted_actions da ON da.id = ar.action_id WHERE da.business_id = ? AND ar.edited_body IS NOT NULL", (business_id,)).fetchone()["c"]
     decided = len(waits)
     errors = conn.execute("SELECT COUNT(*) c FROM audit_log WHERE business_id = ? AND kind = 'pipeline_error'", (business_id,)).fetchone()["c"]
@@ -128,7 +129,7 @@ def stats(conn, business_id: int) -> dict:
         "rejection_rate": round(rejected / decided, 3) if decided else None,
         "edit_rate": round(edited / decided, 3) if decided else None,
         "avg_minutes_to_decision": round(sum(waits) / len(waits), 2) if waits else None,
-        "auto_approved": by_status.get("auto_approved", 0),
+        "auto_approved": auto,
     }
 
 
