@@ -40,6 +40,17 @@ def _simulated_send(action: dict):
     )
 
 
+def _claim_pending(conn, action_id, status, human):
+    # Compare-and-set is the first write. A competing decision that read the
+    # same pending row must lose after SQLite serializes the writers.
+    cur = conn.execute(
+        "UPDATE drafted_actions SET status=?, decided_at=CASE WHEN ? THEN datetime('now') ELSE decided_at END "
+        "WHERE id=? AND status='pending_approval'",
+        (status, int(human), action_id),
+    )
+    return cur.rowcount == 1
+
+
 def approve_and_send(conn, action_id: int) -> dict:
     action = d.get_drafted_action(conn, action_id)
     if not action:
@@ -49,7 +60,8 @@ def approve_and_send(conn, action_id: int) -> dict:
             f"Drafted action {action_id} is not pending approval (current status: {action['status']})"
         )
 
-    d.set_action_status(conn, action_id, "approved", decided_at=True)
+    if not _claim_pending(conn, action_id, "approved", True):
+        raise ApprovalError("Another decision already claimed this action")
     action["status"] = "approved"
     _simulated_send(action)
     d.set_action_status(conn, action_id, "sent")
@@ -68,7 +80,8 @@ def reject_action(conn, action_id: int) -> dict:
         )
 
     # Human decision: mark the moment a person said no.
-    d.set_action_status(conn, action_id, "rejected", decided_at=True)
+    if not _claim_pending(conn, action_id, "rejected", True):
+        raise ApprovalError("Another decision already claimed this action")
     _audit(conn, "rejected", action)
 
     return d.get_drafted_action(conn, action_id)
@@ -76,13 +89,16 @@ def reject_action(conn, action_id: int) -> dict:
 
 def maybe_auto_approve(conn, action_id: int) -> dict | None:
     action = d.get_drafted_action(conn, action_id)
+    if not action or action["status"] != "pending_approval":
+        return None
     if not d.is_auto_approved(conn, action["business_id"], action["action_type"]):
         return None
 
     # Auto-approval is policy-driven, not a human decision: decided_at stays
     # NULL. created_at + the status value reconstruct the timeline without
     # conflating auto-approval with a human "yes".
-    d.set_action_status(conn, action_id, "auto_approved", decided_at=False)
+    if not _claim_pending(conn, action_id, "auto_approved", False):
+        return None
     action["status"] = "auto_approved"
     _simulated_send(action)
     d.set_action_status(conn, action_id, "sent", decided_at=False)
