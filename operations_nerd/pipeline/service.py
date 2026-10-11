@@ -53,6 +53,7 @@ def _build_extraction_schema(extract_fields: list[str], usable_action_types: lis
         "type": "object",
         "properties": properties,
         "required": extract_fields + ["action_type"],
+        "additionalProperties": False,
     }
 
 
@@ -101,11 +102,18 @@ def process_event(conn, pack: Pack, event_id: int) -> dict:
 
     try:
         parsed = json.loads(raw_extraction)
-        action_type = parsed["action_type"]
-    except (ValueError, TypeError, KeyError) as e:
-        raise PipelineError(f"The model's extraction reply was not usable ({type(e).__name__}); nothing was drafted.")
+    except (ValueError, TypeError):
+        raise PipelineError("The model's extraction reply was not valid JSON; nothing was drafted.") from None
+    # Provider structured-output support is not a local validation boundary.
+    # Enforce the exact pack schema even when a provider ignores it.
+    expected_fields = set(schema.extract_fields) | {"action_type"}
+    if not isinstance(parsed, dict) or set(parsed) != expected_fields:
+        raise PipelineError("Extraction fields do not match the config pack; nothing was drafted.")
+    if any(not isinstance(value, str) for value in parsed.values()):
+        raise PipelineError("Extraction fields must be strings; nothing was drafted.")
+    action_type = parsed["action_type"]
     if action_type not in usable_action_types:
-        raise PipelineError(f"The model chose action_type {action_type!r}, which this pack does not allow.")
+        raise PipelineError("The model chose an action type this pack does not allow.")
 
     d.mark_event_processed(conn, event_id, parsed_data=parsed)
 
@@ -116,6 +124,9 @@ def process_event(conn, pack: Pack, event_id: int) -> dict:
     }
     draft_prompt = render_template(pack.prompts[action_type], draft_context)
     draft_text = call_llm(draft_prompt)
+
+    if not isinstance(draft_text, str) or not draft_text.strip() or len(draft_text) > 100000:
+        raise PipelineError("The model's draft must be non-empty text of at most 100000 characters.")
 
     drafted_action_id = d.create_drafted_action(
         conn,
