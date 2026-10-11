@@ -130,3 +130,23 @@ CREATE TABLE IF NOT EXISTS action_reviews (
     edited_body   TEXT,
     reason        TEXT
 );
+
+-- Durable inbound receipt lifecycle. Owner-triggered processing only; no background
+-- worker or external sends. Idempotency is scoped to business + event source.
+CREATE TABLE IF NOT EXISTS event_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id),
+    source TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    raw_content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    event_id INTEGER REFERENCES events(id),
+    action_id INTEGER REFERENCES drafted_actions(id),
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(business_id, source, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_queue ON event_inbox(business_id, status, id);
