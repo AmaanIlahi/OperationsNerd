@@ -18,6 +18,7 @@ from state.routes import router as state_router
 from pipeline.routes import router as pipeline_router
 from approval.routes import router as approval_router
 from insights.routes import router as insights_router
+from inbox.routes import router as inbox_router
 
 app = FastAPI(title="Operations Nerd")
 
@@ -45,6 +46,7 @@ app.include_router(state_router)
 app.include_router(pipeline_router)
 app.include_router(approval_router)
 app.include_router(insights_router)
+app.include_router(inbox_router)
 
 # Mounted at /ui, not /, so it never conflicts with API routes like
 # /businesses or /packs/{pack_id}/questionnaire.
