@@ -15,7 +15,10 @@ def verify_signature(raw: bytes, signature: str, secret: str | None = None) -> b
         return False
     sig = signature.split("=", 1)[1] if signature.startswith("sha256=") else signature
     want = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(want, sig.strip())
+    sig = sig.strip()
+    if len(sig) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in sig):
+        return False
+    return hmac.compare_digest(want, sig.lower())
 
 
 def import_contacts_csv(conn, business_id: int, text: str) -> dict:
