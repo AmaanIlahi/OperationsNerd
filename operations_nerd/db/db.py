@@ -42,6 +42,7 @@ def init_db(db_path: str = DB_PATH, reset: bool = False):
 def get_conn(db_path: str = DB_PATH):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
@@ -119,6 +120,12 @@ def find_entity_ids_by_attribute(conn, entity_type: str, attribute_name: str, va
     return [r["entity_id"] for r in rows]
 
 
+def _require_business_reference(conn, table: str, row_id: int, business_id: int):
+    row = conn.execute(f"SELECT business_id FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    if row is None or row["business_id"] != business_id:
+        raise ValueError(f"{table} reference does not belong to business {business_id}")
+
+
 # ---------- contacts ----------
 
 def create_contact(conn, business_id: int, name: str, email: str = None,
@@ -183,6 +190,7 @@ def list_contacts(conn, business_id: int) -> list[dict]:
 
 def create_follow_up(conn, business_id: int, contact_id: int, type_: str,
                       due_date: str = None, notes: str = None, extension_data: dict = None) -> int:
+    _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         """INSERT INTO follow_ups (business_id, contact_id, type, due_date, notes)
            VALUES (?, ?, ?, ?, ?)""",
@@ -232,6 +240,8 @@ def list_follow_ups(conn, business_id: int, status: str = None) -> list[dict]:
 # ---------- events ----------
 
 def create_event(conn, business_id: int, source: str, raw_content: str, contact_id: int = None) -> int:
+    if contact_id is not None:
+        _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         "INSERT INTO events (business_id, contact_id, source, raw_content) VALUES (?, ?, ?, ?)",
         (business_id, contact_id, source, raw_content),
@@ -264,6 +274,9 @@ def list_events(conn, business_id: int) -> list[dict]:
 
 def create_drafted_action(conn, event_id: int, business_id: int, action_type: str,
                            payload: dict, contact_id: int = None) -> int:
+    _require_business_reference(conn, "events", event_id, business_id)
+    if contact_id is not None:
+        _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         """INSERT INTO drafted_actions (event_id, business_id, contact_id, action_type, payload)
            VALUES (?, ?, ?, ?, ?)""",
