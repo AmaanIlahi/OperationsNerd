@@ -121,7 +121,7 @@ def test_proposals_endpoint_returns_history_newest_last_and_is_scoped():
     assert first["operations"] == [{"op": "add_field", "entity": lead, "label": "Ref", "type": "text", "required": False}]
     assert len(first["rejected_operations"]) == 1 and first["rejected_operations"][0]["reasons"]
     assert first["impact"][0]["op"] == "add_field" and first["impact"][0]["index"] == 0
-    assert first["model"] == "stub" and first["input_tokens"] == 5
+    assert first["model"] == "stub" and first["input_tokens"] == 10      # partly refused -> retried: two calls of 5
 
     assert len(c.get(f"/api/businesses/{bid}/proposals?limit=1").json()) == 1
     assert c.get(f"/api/businesses/{bid}/proposals?limit=1").json()[0]["id"] == p2["proposal_id"]   # the newest one

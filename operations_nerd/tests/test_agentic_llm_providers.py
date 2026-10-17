@@ -214,7 +214,7 @@ def test_bad_json_is_retried_once_with_the_problem_included():
     assert len(stub.calls) == 2 and view["status"] == "pending" and len(view["operations"]) == 1
     retry = stub.calls[1]
     assert retry[-2] == {"role": "assistant", "content": "not json {"}
-    assert retry[-1]["role"] == "user" and "could not be used" in retry[-1]["content"]
+    assert retry[-1]["role"] == "user" and "could not be fully used" in retry[-1]["content"]
     with d.get_conn() as conn:
         row = conn.execute("SELECT input_tokens, output_tokens, latency_ms FROM proposals WHERE id=?",
                            (view["proposal_id"],)).fetchone()
@@ -248,12 +248,87 @@ def test_refused_twice_shows_the_refusals_and_applies_nothing():
     assert len(stub.calls) == 2 and view["status"] == "no_changes" and len(view["rejected_operations"]) == 1
 
 
-def test_good_and_partly_good_answers_are_not_retried():
+def test_fully_valid_answers_are_not_retried():
     account, biz = new_business()
-    for ops in ([], [GOOD_OP], [GOOD_OP, BAD_OP]):
+    for ops in ([], [GOOD_OP]):
         stub = scripted(ok(ops))
         run_chat(account, biz, stub)
         assert len(stub.calls) == 1, ops
+
+
+def test_partly_refused_answer_is_retried_once():
+    account, biz = new_business()
+    stub = scripted(ok([GOOD_OP, BAD_OP]), ok([GOOD_OP]))
+    view = run_chat(account, biz, stub)
+    assert len(stub.calls) == 2 and view["rejected_operations"] == [] and len(view["operations"]) == 1
+    feedback = stub.calls[1][-1]["content"]
+    assert "1 operation(s) were refused" in feedback and "crm_nope" in feedback
+    assert "expected shape -> add_field: entity, label, type" in feedback           # the exact shape of the refused op
+
+
+REF_STYLE = ok([
+    {"op": "create_entity_type", "label": "Owner", "ref": "owner"},
+    {"op": "create_entity_type", "label": "Dog", "ref": "dog"},
+    {"op": "add_field", "entity": "ref:owner", "label": "Name", "type": "text"},
+    {"op": "add_field", "entity": "ref:dog", "label": "Name", "type": "text"},
+    {"op": "add_link", "label": "Owner", "from": "ref:dog", "to": "ref:owner", "cardinality": "many_to_one"}])
+CORRECT = ok([
+    {"op": "create_entity_type", "label": "Owner", "ref": "owner"},
+    {"op": "create_entity_type", "label": "Dog", "ref": "dog"},
+    {"op": "add_field", "entity": "owner", "label": "Name", "type": "text"},
+    {"op": "add_field", "entity": "dog", "label": "Name", "type": "text"},
+    {"op": "add_link", "label": "Owner", "from": "dog", "to": "owner", "cardinality": "many_to_one"}])
+
+
+def test_ref_style_proposal_is_corrected_on_retry_and_the_correct_one_is_applied():
+    account, biz = new_business()
+    stub = scripted(REF_STYLE, CORRECT)
+    view = run_chat(account, biz, stub, "I run a dog grooming shop")
+    assert len(stub.calls) == 2
+    assert view["rejected_operations"] == [] and len(view["operations"]) == 5
+    feedback = stub.calls[1][-1]["content"]
+    assert "ref:owner" in feedback and "does not exist" in feedback and "add_link: label, from, to" in feedback
+    out = chat.approve(account, view["proposal_id"])                               # and it really applies
+    spec = out["spec"]
+    owner = next(e for e in spec["entities"] if e["label"] == "Owner")
+    dog = next(e for e in spec["entities"] if e["label"] == "Dog")
+    assert [f["label"] for f in owner["fields"]] == ["Name"] and [f["label"] for f in dog["fields"]] == ["Name"]
+    (link,) = spec["links"]
+    assert (link["from"], link["to"]) == (dog["key"], owner["key"])
+    with d.get_conn() as conn:
+        row = conn.execute("SELECT input_tokens, output_tokens, latency_ms FROM proposals WHERE id=?",
+                           (view["proposal_id"],)).fetchone()
+    assert tuple(row) == (20, 10, 14)                                              # both calls, one daily turn
+
+
+def test_the_answer_with_fewer_refusals_is_kept_and_a_tie_goes_to_the_retry():
+    account, biz = new_business()
+    worse = ok([GOOD_OP, BAD_OP, BAD_OP])                                          # 2 refusals
+    better = ok([GOOD_OP, BAD_OP])                                                 # 1 refusal
+    # retry is worse than the first answer: keep the first
+    view = run_chat(account, biz, scripted(better, worse))
+    assert len(view["rejected_operations"]) == 1
+    # retry is better: keep the retry
+    view = run_chat(account, biz, scripted(worse, better))
+    assert len(view["rejected_operations"]) == 1
+    # tie: the retry wins (it is the one that saw the feedback)
+    first_tie = ok([GOOD_OP, BAD_OP])
+    retry_tie = json.dumps({"reply": "retry", "operations": [GOOD_OP, BAD_OP]})
+    view = run_chat(account, biz, scripted(first_tie, retry_tie))
+    assert view["reply"] == "retry"
+
+
+def test_unreadable_retry_keeps_a_readable_first_answer():
+    account, biz = new_business()
+    view = run_chat(account, biz, scripted(ok([GOOD_OP, BAD_OP]), "garbage {"))
+    assert view["status"] == "pending" and len(view["operations"]) == 1 and len(view["rejected_operations"]) == 1
+
+
+def test_system_prompt_has_the_correct_example_and_the_no_ref_prefix_rule():
+    from agentic.spec import empty_spec
+    prompt = chat.build_system_prompt(empty_spec("x"), None, [])
+    assert 'add_link            label "Owner", from "dog", to "owner"' in prompt
+    assert '(no "ref:")' in prompt and "the target goes in `to`" in prompt
 
 
 def test_retry_does_not_spend_a_second_daily_turn():

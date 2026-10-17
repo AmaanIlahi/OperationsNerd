@@ -33,8 +33,10 @@ MAX_MESSAGE_CHARS = 4000
 MAX_REPLY_CHARS = 4000
 MAX_RETRY_ECHO_CHARS = 8000
 
-RETRY_PROMPT = """Your previous answer could not be used: {problem}
-Reply again with the same JSON shape ({{reply, operations}}), correcting the operations. If the request cannot be done, return an empty operations list and explain in the reply."""
+RETRY_PROMPT = """Your previous answer could not be fully used: {problem}
+Reply again with the same JSON shape ({{reply, operations}}) and the COMPLETE list of operations: correct the refused \
+ones to the exact shape given and keep the ones that were fine. Entity references are bare names with no "ref:" prefix. \
+If the request cannot be done, return an empty operations list and explain in the reply."""
 
 # The one LLM call; the provider comes from LLM_PROVIDER. Tests replace this with a stub.
 run_llm = llm.call_structured
@@ -91,6 +93,12 @@ Rules:
 You never invent keys; the server generates them. To use something you create in the same list of operations, \
 give the creating operation a short `ref` and use that ref afterwards.
 - Allowed operations: {operations}.
+- Example: two entity types and a link between them. The ref is a bare lowercase name; it goes unchanged in \
+`entity`, `from` and `to`, and is never prefixed (no "ref:") and never part of a label:
+    create_entity_type  label "Owner", ref "owner"
+    create_entity_type  label "Dog", ref "dog"
+    add_field           entity "dog", label "Name", type "text"
+    add_link            label "Owner", from "dog", to "owner", cardinality "many_to_one"   (the target goes in `to`)
 - Exact attributes per operation (any attribute not listed for an operation is refused; every required one must be present, `label` above all):
 {shapes}
 - Field types: {field_types}. select and multiselect need a non-empty options list; no other type takes options.
@@ -140,10 +148,10 @@ def _strip_keys(spec: dict) -> dict:
     }
 
 
-def operation_shapes() -> str:
-    """One line per operation: required and optional attributes, derived from
-    the operation models so the prompt cannot drift from the validator."""
-    lines = []
+def _shape_lines() -> dict[str, str]:
+    """Operation name -> one line of required and optional attributes, derived
+    from the operation models so prompts cannot drift from the validator."""
+    lines = {}
     for model in Operation.__args__[0].__args__:
         required, optional = [], []
         for name, f in model.model_fields.items():
@@ -151,9 +159,13 @@ def operation_shapes() -> str:
                 continue
             (required if f.is_required() else optional).append(f.alias or name)
         op = model.model_fields["op"].annotation.__args__[0]
-        lines.append(f"  {op}: {', '.join(required) or '(none)'}"
+        lines[op] = (f"{op}: {', '.join(required) or '(none)'}"
                      + (f"  [optional: {', '.join(optional)}]" if optional else ""))
-    return "\n".join(lines)
+    return lines
+
+
+def operation_shapes() -> str:
+    return "\n".join("  " + line for line in _shape_lines().values())
 
 
 def build_system_prompt(spec: dict, template: dict | None, rejections: list[dict]) -> str:
@@ -196,12 +208,22 @@ def _add(a, b):
     return None if a is None and b is None else (a or 0) + (b or 0)
 
 
-def _retry_problem(raw_ops: list, outcome: dict) -> str | None:
-    """Why the first answer is worth one retry, or None. Only a proposal where
-    every operation was refused counts; a partly valid one is shown as is."""
-    if raw_ops and not outcome["applied"]:
-        return "Every operation you proposed was refused by the server: " + json.dumps(outcome["rejected"])
-    return None
+def _refusal_feedback(rejected: list[dict]) -> str:
+    """Each refused operation with the server's reasons and the exact shape
+    that operation must have."""
+    shapes = _shape_lines()
+    out = [f"{len(rejected)} operation(s) were refused by the server:"]
+    for r in rejected:
+        op = r["op"].get("op") if isinstance(r.get("op"), dict) else None
+        out.append(f"- operation #{r.get('index')} {json.dumps(r.get('op'))}: " + "; ".join(r["reasons"]))
+        out.append("  expected shape -> " + (shapes[op] if op in shapes else
+                                             "unknown operation; use one of: " + ", ".join(OPERATION_NAMES)))
+    return "\n".join(out)
+
+
+def _parse_and_apply(text: str, spec: dict):
+    reply, raw_ops = _parse_model_output(text)
+    return reply, raw_ops, apply_each(spec, raw_ops)
 
 
 def _proposal_view(proposal_id: int, status: str, base_version: int, reply: str,
@@ -247,14 +269,15 @@ def chat(account_id: int, business_id: int, messages: list[dict]) -> dict:
             store.refund_chat_turn(conn, account_id)
         raise ChangeError(502, f"The assistant is unavailable: {e}")
     chat_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+    first = None
     try:
-        reply, raw_ops = _parse_model_output(result.text)
-        outcome = apply_each(spec, raw_ops)
-        problem = _retry_problem(raw_ops, outcome)
+        first = _parse_and_apply(result.text, spec)
+        problem = _refusal_feedback(first[2]["rejected"]) if first[2]["rejected"] else None
     except ChangeError as e:
-        reply, raw_ops, outcome, problem = None, None, None, e.detail
+        problem = e.detail
     if problem:
-        # One retry, telling the model what was wrong with its first answer.
+        # One retry, telling the model what was wrong with its first answer
+        # (anything refused, even if other operations were valid).
         try:
             second = run_llm(system, chat_messages + [
                 {"role": "assistant", "content": (result.text or "")[:MAX_RETRY_ECHO_CHARS]},
@@ -268,8 +291,16 @@ def chat(account_id: int, business_id: int, messages: list[dict]) -> dict:
                            _add(result.input_tokens, second.input_tokens),
                            _add(result.output_tokens, second.output_tokens),
                            result.latency_ms + second.latency_ms)
-        reply, raw_ops = _parse_model_output(second.text)   # still unreadable -> clear 502 to the chat
-        outcome = apply_each(spec, raw_ops)
+        try:
+            retried = _parse_and_apply(second.text, spec)
+        except ChangeError:
+            if first is None:
+                raise                       # both answers unreadable -> clear 502 to the chat
+            retried = None                  # keep the first (readable) answer
+        # Keep whichever answer has fewer refusals; a tie goes to the retry.
+        if retried is not None and (first is None or len(retried[2]["rejected"]) <= len(first[2]["rejected"])):
+            first = retried
+    reply, raw_ops, outcome = first
     applied, rejected = outcome["applied"], outcome["rejected"]
     status = "pending" if applied else "no_changes"
 

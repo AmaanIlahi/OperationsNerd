@@ -49,3 +49,15 @@ and pass^k from 100% to 70%, entirely from **one** root failure plus its cascade
   this same failure it is an **implementation bug** (no retry on a mostly
   refused proposal), and the 8 cascade failures belong with it. HISTORY.csv is
   append-only, so the row is left as logged.
+
+
+### Classification rule changed (commit "Retry on any refused operation, add prompt example, reclassify partial refusals")
+
+From the commit with that subject onward, the harness classifies a failure as an
+**implementation bug** (not a pack-authoring gap) when a proposal was partly
+refused and not retried, or was still mostly refused (more than half of its
+operations) after the retry. Later "no suitable target" failures in the same run
+inherit the class of the run's first failure. T09 is exempt, since refusals there
+are the expected outcome. HISTORY.csv rows logged before this change keep the
+labels they were logged with (the file is append-only); use the `commit` column
+to see which rule produced a row.

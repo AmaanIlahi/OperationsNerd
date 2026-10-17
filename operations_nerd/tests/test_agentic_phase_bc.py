@@ -546,8 +546,9 @@ def test_audit_fields_filled_and_version_links_to_proposal():
                 text="I track leads")
     with d.get_conn() as conn:
         row = dict(conn.execute("SELECT * FROM proposals WHERE id = ?", (p["proposal_id"],)).fetchone())
-    assert row["model"] == "stub-model" and row["input_tokens"] == 111
-    assert row["output_tokens"] == 22 and row["latency_ms"] == 33
+    # the answer was partly refused (duplicate label), so it was retried once: both calls are in the row
+    assert row["model"] == "stub-model" and row["input_tokens"] == 2 * 111
+    assert row["output_tokens"] == 2 * 22 and row["latency_ms"] == 2 * 33
     assert json.loads(row["messages_json"]) == [{"role": "user", "content": "I track leads"}]
     assert row["reply"] == "Adding Lead" and row["status"] == "pending" and row["decided_at"] is None
     assert json.loads(row["ops_json"]) == [{"op": "create_entity_type", "label": "Lead"}]

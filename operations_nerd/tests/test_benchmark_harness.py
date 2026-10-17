@@ -180,9 +180,20 @@ def test_classification_rules():
     assert rb.classify({**base, "checks": [{"type": "no_unintended_record_changes", "ok": False, "reason": "r"}]})[0] == rb.BUG
     assert rb.classify({**base, "steps": [{"http": 500}]})[0] == rb.BUG
     assert rb.classify({**base, "steps": [{"http": 200, "applied_ops": [], "refused": []}]})[0] == rb.GAP
-    refused = {**base, "steps": [{"http": 200, "applied_ops": [], "refused": [{"op": "add_field", "reasons": ["'label' is required"]}]}]}
-    label, why = rb.classify(refused)
-    assert label == rb.GAP and "label" in why
+    refusal = {"op": "add_field", "reasons": ["'label' is required"]}
+    valid = ["create_entity_type"] * 3
+    # rule changed 2026-10-17: partly refused and not retried, or still mostly refused after the retry -> bug
+    not_retried = {**base, "steps": [{"http": 200, "applied_ops": valid, "refused": [refusal] * 12, "retries": 0}]}
+    label, why = rb.classify(not_retried)
+    assert label == rb.BUG and "not retried" in why
+    mostly = {**base, "steps": [{"http": 200, "applied_ops": valid, "refused": [refusal] * 12, "retries": 1}]}
+    label, why = rb.classify(mostly)
+    assert label == rb.BUG and "Still mostly refused" in why
+    minority = {**base, "steps": [{"http": 200, "applied_ops": valid * 4, "refused": [refusal], "retries": 1}]}
+    assert rb.classify(minority)[0] == rb.GAP                                    # retried, mostly fine: still a guidance gap
+    t09_refusals = {"task": "T09", "steps": [{"http": 200, "applied_ops": [], "refused": [refusal], "retries": 1}],
+                    "errors": [], "checks": [{"type": "duplicate_not_proposed", "ok": False, "reason": "r"}]}
+    assert rb.classify(t09_refusals)[0] == rb.GAP                                # refusals are expected in T09
     t09 = {"task": "T09", "steps": [{"http": 200}], "errors": [], "checks": [{"type": "spec_unchanged", "ok": False, "reason": "r"}]}
     assert rb.classify(t09)[0] == rb.BUG
 

@@ -683,6 +683,15 @@ def classify(t: dict) -> tuple[str, str]:
         if len(decided) == len(steps) and not any(s.get("refused") for s in steps):
             return BUG, "Remove then restore/revert was applied without refusals but did not return to the original spec: the round trip is lossy."
         return GAP, "The agent did not produce the right restore operation, so the spec never returned to its original state; the operation set can express it."
+    if t["task"] != "T09":                       # T09 expects refusals; a refusal there is the system working
+        for st in steps:
+            n_refused, n_valid = len(st.get("refused", [])), len(st.get("applied_ops", []))
+            if n_refused and not st.get("retries"):
+                return BUG, (f"{n_refused} of {n_refused + n_valid} operations were refused and the turn was not retried: "
+                             "any refusal must trigger one retry with the reasons.")
+            if n_refused and st.get("retries") and n_refused > n_valid:
+                return BUG, (f"Still mostly refused after the retry ({n_refused} of {n_refused + n_valid} operations): "
+                             "the retry did not repair the proposal.")
     refused = [r for s in steps for r in s.get("refused", [])]
     if refused:
         reasons = "; ".join(sorted({x for r in refused for x in r["reasons"]}))[:240]
@@ -715,12 +724,18 @@ def run_all(h, config, args):
             assert r.status_code == 201, r.text
             bid = r.json()["id"]
             run_entry = {"run": run, "business_id": bid, "tasks": [], "seed": None}
+            root = None                     # the first failure in this run; later "no target" failures inherit it
             for task in tasks:
                 t = run_task(h, task, biz, c, bid, price)
                 if t["passed"]:
                     t["classification"] = None
                 else:
                     t["classification"], t["classification_reason"] = classify(t)
+                    if t.get("precondition_failed") and root:
+                        t["classification"] = root[0]
+                        t["classification_reason"] = f"Cascade from {root[2]}: {root[1]}"
+                    elif root is None:
+                        root = (t["classification"], t["classification_reason"], task["id"])
                 run_entry["tasks"].append(t)
                 print(f"[{biz['id']} run {run}] {task['id']} {'PASS' if t['passed'] else 'FAIL'} "
                       f"{t['seconds']}s {t['input_tokens'] + t['output_tokens']} tok", flush=True)
