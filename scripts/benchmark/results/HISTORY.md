@@ -9,6 +9,7 @@ Generated from `HISTORY.csv` (append-only) and `NOTES.md`; do not edit by hand. 
 
 | Run | Commit | Dirty | Model | k | Pass | pass^k | Median s | Tokens | Cost $ | Unintended data | Core lines | Failures (gap / bug / break) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| [20261017-021801](20261017-021801/report.md) | `ab0069b` | no | gemini-3.8-flash | 3 | 90.0% | 70.0% | 7.4 | 334,966 | 0.2565 | 0 | 0 | 9 / 0 / 0 |
 | [20261017-013108](20261017-013108/report.md) | `0c1be01` | no | gemini-3.8-flash | 3 | 100.0% | 100.0% | 7.9 | 360,202 | 0.2729 | 0 | 0 | 0 / 0 / 0 |
 | [20261017-011640](20261017-011640/report.md) | `9af3425` | yes | gemini-3.8-flash | 3 | 100.0% | 100.0% | 8.1 | 371,041 | 0.3053 | 0 | 0 | 0 / 0 / 0 |
 
