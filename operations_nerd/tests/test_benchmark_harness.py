@@ -299,6 +299,56 @@ def test_results_folder_is_outside_the_core_code_leak_diff():
     assert rb.git_state() == before
 
 
+def test_commit_flag_commits_only_results_and_pushes():
+    """git_commit_and_push in a throwaway repo with a bare remote: only the new
+    results folder and the two history files are committed, nothing else."""
+    def git(cwd, *args):
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        assert r.returncode == 0, (args, r.stderr)
+        return r.stdout.strip()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        remote, repo = os.path.join(tmp, "remote.git"), os.path.join(tmp, "repo")
+        git(tmp, "init", "--bare", "-b", "main", remote)
+        git(tmp, "init", "-b", "main", repo)
+        git(repo, "config", "user.name", "t")
+        git(repo, "config", "user.email", "t@example.com")
+        git(repo, "remote", "add", "origin", remote)
+        results = os.path.join(repo, "scripts", "benchmark", "results")
+        os.makedirs(os.path.join(results, "20260101-000000"))
+        with open(os.path.join(repo, "core.py"), "w") as f:
+            f.write("a = 1\n")
+        git(repo, "add", "."), git(repo, "commit", "-m", "base"), git(repo, "push", "origin", "main")
+
+        with open(os.path.join(repo, "core.py"), "w") as f:                       # unrelated uncommitted work
+            f.write("a = 2\n")
+        with open(os.path.join(repo, "notes.txt"), "w") as f:
+            f.write("untracked\n")
+        for name in ("report.md", "results.json", "meta.json"):
+            with open(os.path.join(results, "20260101-000000", name), "w") as f:
+                f.write("x\n")
+        for name in ("HISTORY.csv", "HISTORY.md"):
+            with open(os.path.join(results, name), "w") as f:
+                f.write("x\n")
+
+        saved, rb.REPO = rb.REPO, repo
+        try:
+            rb.git_commit_and_push(os.path.join(results, "20260101-000000"), results,
+                                   {"timestamp": "20260101-000000", "model": "gemini-x"}, 0.9, "main")
+        finally:
+            rb.REPO = saved
+
+        assert git(repo, "log", "-1", "--format=%s") == "benchmark: 20260101-000000 gemini-x pass 90.0%"
+        assert "Co-Authored" not in git(repo, "log", "-1", "--format=%B")
+        files = set(git(repo, "show", "--name-only", "--format=", "HEAD").splitlines())
+        assert files == {"scripts/benchmark/results/20260101-000000/report.md",
+                         "scripts/benchmark/results/20260101-000000/results.json",
+                         "scripts/benchmark/results/20260101-000000/meta.json",
+                         "scripts/benchmark/results/HISTORY.csv", "scripts/benchmark/results/HISTORY.md"}, files
+        assert git(repo, "status", "--porcelain").splitlines() == ["M core.py", "?? notes.txt"]   # untouched
+        assert git(remote, "log", "-1", "--format=%s", "main") == git(repo, "log", "-1", "--format=%s")
+
+
 def test_task_file_is_well_formed():
     import yaml
     cfg = yaml.safe_load(open(os.path.join(BENCH, "tasks.yaml"), encoding="utf-8"))

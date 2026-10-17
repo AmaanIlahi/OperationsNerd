@@ -42,3 +42,27 @@ One failure in it matters and is recorded here.
   two full runs) passed with zero refused operations. A pass rate from 3 runs
   per task is a small sample; see the pass^k column.
 - **Not fixed.** Agent, validator and app behaviour are unchanged on purpose.
+
+
+### 20261017-021801 - 81/90: the groomer T01 `ref:owner` failure happened again
+
+First run after the foreign-key pragma (Harsh's PR #13 commit) and the
+production route change, at commit `ab0069b`. Pass rate fell from 100% to 90%
+and pass^k from 100% to 70%, entirely from **one** root failure plus its cascade:
+
+- **groomer run 2, T01:** the same failure as the smoke run above. 13 of 16
+  operations refused (`Entity type 'ref:owner' / 'ref:dog' / 'ref:appointment'
+  does not exist`), 0 retries because the three `create_entity_type`
+  operations were valid. The three entity types had no fields. T02-T05 and
+  T07-T10 then failed as a cascade (8 tasks, "no suitable target"). T06 passed
+  because an unlinked pair of entities still existed.
+- **Not caused by this change.** No data changed (0 unintended record changes,
+  other businesses identical) and no foreign-key or routing error occurred; the
+  refusals come from the model's output, not the database. It is the second
+  sighting of this failure in 20 groomer/bakery T01 runs across three full runs
+  and the smoke run.
+- **Classification:** the CSV row says 9 x "pack-authoring gap" because that is
+  what the harness's first-pass rule outputs. Per the earlier owner review of
+  this same failure it is an **implementation bug** (no retry on a mostly
+  refused proposal), and the 8 cascade failures belong with it. HISTORY.csv is
+  append-only, so the row is left as logged.

@@ -842,14 +842,14 @@ def write_meta(out_dir, meta):
         json.dump(meta, f, indent=2)
 
 
-def git_commit_and_push(out_dir, results_root, meta, pass_rate):
+def git_commit_and_push(out_dir, results_root, meta, pass_rate, branch):
     """Commits exactly the new results folder and the history files (nothing
     else in the tree), then pushes the current branch. No trailers."""
     rel = lambda p: os.path.relpath(p, REPO).replace(os.sep, "/")
     paths = [rel(out_dir), rel(os.path.join(results_root, history.CSV_NAME)), rel(os.path.join(results_root, history.MD_NAME))]
     msg = f"benchmark: {meta['timestamp']} {meta['model']} pass {pass_rate * 100:.1f}%"
     for cmd in (["git", "add", "--", *paths], ["git", "commit", "-m", msg, "--", *paths],
-                ["git", "push", "origin", meta["branch"]]):
+                ["git", "push", "origin", branch]):
         r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit(f"{' '.join(cmd[:2])} failed: {(r.stderr or r.stdout).strip()[:300]}")
@@ -943,7 +943,7 @@ def main(argv=None):
         history.write_markdown(args.out)
         print(f"Logged to {os.path.join(args.out, history.CSV_NAME)}")
         if args.commit:
-            git_commit_and_push(out_dir, args.out, meta, float(row["pass_rate"]))
+            git_commit_and_push(out_dir, args.out, meta, float(row["pass_rate"]), tree["branch"])
     else:
         print("Not logged to HISTORY (dry run or filtered run); only full live runs are comparable.")
     return out_dir
