@@ -192,3 +192,15 @@ Each run several times per system, recording success, turns, corrections, time, 
 5. Remove a field, then restore it
 6. Add a link between two entity types
 7. A bad request (duplicate entity, unsupported type) — must be refused without damage
+
+## Umbrella and modules (direction, Oct 2026)
+
+- **OperationsNerd is the core:** the chat agent, validation, approval, versioning and per-account isolation. It knows no industry.
+- **Application modules plug in** through a module interface. The first is LogisticsNerd. The interface is **not built yet**;
+  logistics starts as standalone code with tests in `modules/logistics/`, with no core imports.
+- **Chat changes the shape of the data** (entity types, fields, links) with zero code. Hard rule 1 still holds.
+- **Modules own workflow rules** (for example receiving, shipping, stock). They are written once per module, never per company.
+  An owner configures the shape; the module supplies the behaviour.
+- **Shared core data** (parties, items, accounting) is planned, **not built**. Modules would reference it instead of each keeping a copy.
+- **Open decision, isolation:** one shared database with `business_id` on every table (today, scoped by account), or one database per company.
+  Decide before the first module touches core data.
