@@ -52,6 +52,23 @@ if os.environ.get("CONFIG_AGENT_ENABLED") == "1":
     app.mount("/agent", StaticFiles(directory="frontend_agent", html=True), name="agent")
 
 
+# Production serves only /app, /api/* and /healthz. The legacy demo routes
+# (questionnaire, state, pipeline, approval, /ui, /agent) have no auth and are
+# not scoped to an account, so they are dropped from the route table when
+# APP_ENV=production. Local development keeps them. Done here, after
+# everything is mounted, so the legacy route files stay untouched.
+if agentic_config.is_production():
+    _legacy_routers = (questionnaire_router, state_router, pipeline_router, approval_router)
+    _legacy_paths = {r.path for router in _legacy_routers for r in router.routes} | {"/ui", "/agent"}
+
+    def _is_legacy(route) -> bool:
+        # Newer FastAPI wraps each include_router() in one entry that points back
+        # at the router it was made from; older versions copy the routes in flat.
+        return getattr(route, "original_router", None) in _legacy_routers or getattr(route, "path", None) in _legacy_paths
+
+    app.router.routes[:] = [r for r in app.router.routes if not _is_legacy(r)]
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "Operations Nerd"}
