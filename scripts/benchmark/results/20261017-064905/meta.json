@@ -1,0 +1,37 @@
+{
+  "timestamp": "20261017-064905",
+  "commit": "f39d65cb161a741e1fa43ddb6f077e2c247d9f26",
+  "branch": "feature/agentic-crm",
+  "dirty_tree": false,
+  "dirty_files": [],
+  "provider": "gemini",
+  "model": "gemini-3.8-flash",
+  "system_prompt_sha256": "7cdc1046bf8d7913f1e5036d6d33250760dcb30bd209d5adeff6a818a57ea7f3",
+  "runs": 3,
+  "businesses": [
+    "gym",
+    "groomer",
+    "bakery"
+  ],
+  "tasks": [
+    "T01",
+    "T02",
+    "T03",
+    "T04",
+    "T05",
+    "T06",
+    "T07",
+    "T08",
+    "T09",
+    "T10"
+  ],
+  "dry_run": false,
+  "full_suite": true,
+  "prices": {
+    "basis": "assumed",
+    "input_per_mtok": 0.3,
+    "output_per_mtok": 2.5
+  },
+  "wall_seconds": 768.4,
+  "backfilled": false
+}
