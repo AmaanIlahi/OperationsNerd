@@ -33,6 +33,8 @@ import time
 
 import yaml
 
+import history
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 APP_DIR = os.path.join(REPO, "operations_nerd")
@@ -218,9 +220,46 @@ def git_state() -> dict:
     def git(*args):
         r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else f"(git failed: {r.stderr.strip()[:200]})"
+    lines = 0
+    for row in git("diff", "--numstat", "HEAD", *spec).splitlines():
+        added, deleted, *_ = row.split("\t")
+        lines += (int(added) if added.isdigit() else 0) + (int(deleted) if deleted.isdigit() else 0)
+    for path in git("ls-files", "--others", "--exclude-standard", *spec).splitlines():
+        try:
+            with open(os.path.join(REPO, path), encoding="utf-8", errors="replace") as f:
+                lines += sum(1 for _ in f)
+        except OSError:
+            pass
     return {"diff_stat": git("diff", "--stat", "HEAD", *spec),
             "status": git("status", "--porcelain", *spec),
-            "head": git("rev-parse", "--short", "HEAD")}
+            "head": git("rev-parse", "--short", "HEAD"),
+            "lines": lines}
+
+
+def tree_state() -> dict:
+    """Where the run happened: commit, branch, and whether the working tree
+    had uncommitted changes anywhere (benchmark output under results/ does not
+    count, since every run creates it)."""
+    def git(*args):
+        r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    files = [l for l in git("status", "--porcelain", "--", ".", ":(exclude)scripts/benchmark/results").splitlines() if l]
+    return {"commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(files), "dirty_files": files}
+
+
+def system_prompt_hash() -> str:
+    """sha256 of the agent's system prompt as built for an empty business, so
+    any wording or operation-shape change shows up as a different hash."""
+    sys.path.insert(0, APP_DIR)
+    from agentic import chat
+    from agentic.spec import empty_spec
+    return hashlib.sha256(chat.build_system_prompt(empty_spec("x"), None, []).encode("utf-8")).hexdigest()
+
+
+def price_meta(config, args) -> dict:
+    supplied = args.price_in is not None and args.price_out is not None
+    return {**config["pricing"], "basis": "supplied" if supplied else config["pricing"].get("basis", "assumed")}
 
 
 # =====================================================================
@@ -787,11 +826,79 @@ def parse_args(argv=None):
     p.add_argument("--price-in", type=float, default=None, help="USD per 1M input tokens")
     p.add_argument("--price-out", type=float, default=None, help="USD per 1M output tokens")
     p.add_argument("--out", default=os.path.join(HERE, "results"), help="parent directory for the timestamped results folder")
+    p.add_argument("--commit", action="store_true",
+                   help="after a live, full-suite run: commit only the new results folder and HISTORY files, then push")
+    p.add_argument("--backfill", action="store_true",
+                   help="add meta.json and a HISTORY.csv row for existing results folders that lack them, then exit")
     return p.parse_args(argv)
+
+
+def full_suite(args) -> bool:
+    return not (args.dry_run or args.tasks or args.businesses)
+
+
+def write_meta(out_dir, meta):
+    with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+def git_commit_and_push(out_dir, results_root, meta, pass_rate):
+    """Commits exactly the new results folder and the history files (nothing
+    else in the tree), then pushes the current branch. No trailers."""
+    rel = lambda p: os.path.relpath(p, REPO).replace(os.sep, "/")
+    paths = [rel(out_dir), rel(os.path.join(results_root, history.CSV_NAME)), rel(os.path.join(results_root, history.MD_NAME))]
+    msg = f"benchmark: {meta['timestamp']} {meta['model']} pass {pass_rate * 100:.1f}%"
+    for cmd in (["git", "add", "--", *paths], ["git", "commit", "-m", msg, "--", *paths],
+                ["git", "push", "origin", meta["branch"]]):
+        r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit(f"{' '.join(cmd[:2])} failed: {(r.stderr or r.stdout).strip()[:300]}")
+    print(f"Committed and pushed: {msg}")
+
+
+def backfill(results_root):
+    """Gives older results folders a meta.json and a HISTORY row. Reads only
+    what the run itself recorded; the branch is the one checked out now."""
+    tree = tree_state()
+    added = 0
+    for stamp in sorted(os.listdir(results_root)):
+        folder = os.path.join(results_root, stamp)
+        path = os.path.join(folder, "results.json")
+        if not os.path.exists(path):
+            continue
+        data = json.load(open(path, encoding="utf-8"))
+        old = data["meta"]
+        full = subprocess.run(["git", "rev-parse", data["git_before"]["head"]], cwd=REPO,
+                              capture_output=True, text=True).stdout.strip() or data["git_before"]["head"]
+        dirty_files = [l for l in data["git_before"]["status"].splitlines() if l]
+        pricing = old.get("pricing", {})
+        tasks = sorted({t["task"] for b in data["businesses"] for r in b["runs"] for t in r["tasks"]})
+        meta = {"timestamp": old["timestamp"], "commit": full, "branch": tree["branch"],
+                "dirty_tree": bool(dirty_files), "dirty_files": dirty_files,
+                "provider": old["provider"], "model": old["model"], "system_prompt_sha256": system_prompt_hash(),
+                "runs": old["runs"], "businesses": old["businesses"], "tasks": tasks, "dry_run": old["dry_run"],
+                "prices": {**pricing, "basis": pricing.get("basis", "assumed")}, "wall_seconds": old.get("wall_seconds"),
+                "backfilled": True,
+                "backfill_note": "meta.json written after the fact from results.json; branch is the branch checked out at backfill; "
+                                 "system prompt hash computed from the current code (agentic/chat.py unchanged since the run's commit)."}
+        if not os.path.exists(os.path.join(folder, "meta.json")):
+            write_meta(folder, meta)
+        row = history.build_row(old, data["businesses"], data["git_before"], data["git_after"], full, bool(dirty_files))
+        if not old["dry_run"] and history.append_row(results_root, row):
+            added += 1
+            print(f"logged {stamp}")
+    history.write_markdown(results_root)
+    print(f"Backfill done: {added} row(s) added.")
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.backfill:
+        backfill(args.out)
+        return None
+    if args.commit and not full_suite(args):
+        sys.exit("--commit needs a live, full-suite run (no --dry-run, --tasks or --businesses), "
+                 "so the permanent log only holds comparable runs.")
     config = yaml.safe_load(open(TASKS_FILE, encoding="utf-8"))
     if args.price_in is not None:
         config["pricing"]["input_per_mtok"] = args.price_in
@@ -803,6 +910,7 @@ def main(argv=None):
     out_dir = os.path.join(args.out, stamp)
     os.makedirs(out_dir, exist_ok=True)
 
+    tree = tree_state()
     git_before = git_state()
     t0 = time.monotonic()
     results = run_all(h, config, args)
@@ -819,7 +927,25 @@ def main(argv=None):
                    "summary": rows, "businesses": results}, f, indent=2, default=str)
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as f:
         f.write(build_report(meta, results, rows, git_before, git_after, config))
+    write_meta(out_dir, {
+        "timestamp": stamp, "commit": tree["commit"], "branch": tree["branch"],
+        "dirty_tree": tree["dirty"], "dirty_files": tree["dirty_files"],
+        "provider": meta["provider"], "model": meta["model"], "system_prompt_sha256": system_prompt_hash(),
+        "runs": args.runs, "businesses": meta["businesses"],
+        "tasks": [t["id"] for t in config["tasks"] if not args.tasks or t["id"] in args.tasks],
+        "dry_run": args.dry_run, "full_suite": full_suite(args),
+        "prices": price_meta(config, args), "wall_seconds": round(wall, 1), "backfilled": False})
     print(f"\nResults: {out_dir}")
+
+    if full_suite(args):
+        row = history.build_row(meta, results, git_before, git_after, tree["commit"], tree["dirty"])
+        history.append_row(args.out, row)
+        history.write_markdown(args.out)
+        print(f"Logged to {os.path.join(args.out, history.CSV_NAME)}")
+        if args.commit:
+            git_commit_and_push(out_dir, args.out, meta, float(row["pass_rate"]))
+    else:
+        print("Not logged to HISTORY (dry run or filtered run); only full live runs are comparable.")
     return out_dir
 
 

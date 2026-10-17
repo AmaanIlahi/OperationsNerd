@@ -28,6 +28,7 @@
 # Checks default to the last step; `after_step: N` (1-based) checks earlier.
 
 pricing:                     # ASSUMPTION: USD per 1M tokens, Gemini 2.5 Flash list price.
+  basis: assumed             # "assumed" until real rates are set here; --price-in/--price-out make it "supplied"
   input_per_mtok: 0.30       # Replace with the real rate for the model under test
   output_per_mtok: 2.50      # (or pass --price-in / --price-out).
 

@@ -18,6 +18,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 BENCH = os.path.join(REPO, "scripts", "benchmark")
 sys.path.insert(0, BENCH)
 
+import history
 import run_benchmark as rb
 
 
@@ -49,9 +50,16 @@ def test_dry_run_completes_and_writes_results():
         assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
         (stamp,) = os.listdir(out)
         data = json.load(open(os.path.join(out, stamp, "results.json"), encoding="utf-8"))
+        meta = json.load(open(os.path.join(out, stamp, "meta.json"), encoding="utf-8"))
+        assert not os.path.exists(os.path.join(out, history.CSV_NAME)) and not os.path.exists(os.path.join(out, history.MD_NAME)), \
+            "a dry run must not enter the permanent log"
         report = open(os.path.join(out, stamp, "report.md"), encoding="utf-8").read()
 
     assert data["meta"]["dry_run"] is True and data["meta"]["provider"] == "stub"
+    assert meta["dry_run"] is True and meta["backfilled"] is False and meta["provider"] == "stub"
+    assert meta["branch"] and len(meta["commit"]) == 40 and isinstance(meta["dirty_tree"], bool)
+    assert len(meta["system_prompt_sha256"]) == 64 and meta["runs"] == 1 and meta["tasks"][0] == "T01"
+    assert meta["prices"]["basis"] == "assumed" and meta["prices"]["input_per_mtok"] > 0
     assert [b["business"] for b in data["businesses"]] == ["gym", "groomer", "bakery"]
     tasks = [t for b in data["businesses"] for run in b["runs"] for t in run["tasks"]]
     assert len(tasks) == 3 * 10, len(tasks)
@@ -192,6 +200,103 @@ def test_selectors_pick_real_targets_or_none():
     assert rb.SELECTORS["unlinked_pair"](s, biz)["entity_b_key"] == "e2"
     assert rb.SELECTORS["retypable_field"](spec(entity("e1", "Member", field("f1", "Name"))), biz) is None
     assert rb.SELECTORS["primary_entity"](spec(), biz) is None
+
+
+# ---------- permanent log ----------
+
+def fake_task(passed=True, seconds=5.0, cls=None, unintended=0):
+    return {"task": "T01", "passed": passed, "seconds": seconds, "input_tokens": 100, "output_tokens": 50,
+            "cost_usd": 0.001, "unintended_record_changes": unintended, "classification": cls}
+
+
+def fake_businesses(*cells):
+    """cells: one list of per-run task dicts per (task, business) cell."""
+    biz = [{"business": f"b{i}", "runs": []} for i in range(len(cells))]
+    for i, runs in enumerate(cells):
+        for r, t in enumerate(runs):
+            biz[i]["runs"].append({"run": r + 1, "tasks": [{**t, "task": f"T{i + 1:02d}"}]})
+    return biz
+
+
+def test_history_row_metrics():
+    clean = {"diff_stat": "", "status": "", "lines": 0}
+    biz = fake_businesses([fake_task(), fake_task(), fake_task()],
+                          [fake_task(), fake_task(False, cls=rb.BUG), fake_task()],
+                          [fake_task(False, seconds=11, cls=rb.GAP, unintended=2), fake_task(), fake_task(False, cls=rb.BREAK)])
+    row = history.build_row({"timestamp": "20260101-000000", "model": "m", "runs": 3}, biz, clean, clean, "a" * 40, True)
+    assert row["pass_rate"] == "0.6667" and row["pass_hat_k"] == "0.3333"       # 6/9 runs; 1 of 3 cells all-pass
+    assert row["median_seconds_per_task"] == "5.0" and row["total_tokens"] == 9 * 150
+    assert row["est_cost_usd"] == "0.0090" and row["unintended_data_changes"] == 2
+    assert (row["fail_pack_authoring_gap"], row["fail_implementation_bug"], row["fail_true_break"]) == (1, 1, 1)
+    assert row["dirty_tree"] == "yes" and row["core_lines_changed"] == 0 and list(row) == history.COLUMNS
+    leaked = {"diff_stat": " x | 3 ++-", "status": " M operations_nerd/x.py", "lines": 3}
+    assert history.build_row({"timestamp": "t", "model": "m", "runs": 1}, biz, clean, leaked, "a" * 40, False)["core_lines_changed"] == 3
+    assert history.core_lines_changed(leaked, leaked) == 0                       # dirty before and unchanged: no leak
+
+
+def test_history_csv_is_append_only_and_markdown_newest_first():
+    with tempfile.TemporaryDirectory() as root:
+        clean = {"diff_stat": "", "status": "", "lines": 0}
+        biz = fake_businesses([fake_task()])
+        meta = lambda ts: {"timestamp": ts, "model": "gemini-x", "runs": 1}
+        assert history.append_row(root, history.build_row(meta("20260101-000000"), biz, clean, clean, "1" * 40, False))
+        csv_path = os.path.join(root, history.CSV_NAME)
+        first = open(csv_path, "rb").read()
+        assert history.append_row(root, history.build_row(meta("20260102-000000"), biz, clean, clean, "2" * 40, True))
+        assert open(csv_path, "rb").read().startswith(first)                     # old rows are never rewritten
+        assert not history.append_row(root, history.build_row(meta("20260101-000000"), biz, clean, clean, "1" * 40, False))
+        assert len(history.read_rows(root)) == 2                                  # a repeated run is skipped
+        with open(os.path.join(root, history.NOTES_NAME), "w", encoding="utf-8") as f:
+            f.write("### a note\nbody\n")
+        md = history.write_markdown(root)
+        assert md.index("20260102-000000") < md.index("20260101-000000")          # newest first
+        assert "[20260102-000000](20260102-000000/report.md)" in md and "### a note" in md
+        assert open(os.path.join(root, history.MD_NAME), encoding="utf-8").read() == md
+
+
+def test_committed_history_matches_its_runs():
+    root = os.path.join(BENCH, "results")
+    rows = history.read_rows(root)
+    assert rows, "HISTORY.csv has no rows"
+    assert list(rows[0]) == history.COLUMNS
+    for r in rows:
+        folder = os.path.join(root, r["timestamp"])
+        assert os.path.exists(os.path.join(folder, "report.md")), r["timestamp"]
+        meta = json.load(open(os.path.join(folder, "meta.json"), encoding="utf-8"))
+        assert meta["commit"] == r["commit"] and meta["model"] == r["model"] and len(meta["system_prompt_sha256"]) == 64
+        assert meta["dirty_tree"] == (r["dirty_tree"] == "yes")
+        assert meta["prices"]["basis"] in ("assumed", "supplied")
+    md = open(os.path.join(root, history.MD_NAME), encoding="utf-8").read()
+    assert all(f"({r['timestamp']}/report.md)" in md for r in rows) and "groomer T01" in md and "implementation bug" in md
+
+
+def test_commit_flag_refused_for_dry_or_filtered_runs():
+    for extra in (["--dry-run"], ["--tasks", "T01"], ["--businesses", "gym"]):
+        r = subprocess.run([sys.executable, os.path.join(BENCH, "run_benchmark.py"), "--commit", "--runs", "1", *extra],
+                           capture_output=True, text=True, timeout=120)
+        assert r.returncode != 0 and "--commit needs a live, full-suite run" in r.stderr, (extra, r.stderr[-300:])
+
+
+def test_results_folder_is_outside_the_core_code_leak_diff():
+    results_probe = os.path.join(BENCH, "results", "_leak_probe.txt")
+    bench_probe = os.path.join(BENCH, "_leak_probe.txt")
+    core_probe = os.path.join(REPO, "operations_nerd", "tests", "_leak_probe.txt")
+    before = rb.git_state()
+    try:
+        for p in (results_probe, bench_probe):
+            with open(p, "w") as f:
+                f.write("x\n")
+        assert rb.git_state() == before                                          # benchmark output never counts as a leak
+        assert not any("results" in f for f in rb.tree_state()["dirty_files"])    # nor as a dirty tree
+        with open(core_probe, "w") as f:
+            f.write("a\nb\n")
+        leaked = rb.git_state()                                                   # control: a core file does count
+        assert "_leak_probe.txt" in leaked["status"] and leaked["lines"] == before["lines"] + 2
+    finally:
+        for p in (results_probe, bench_probe, core_probe):
+            if os.path.exists(p):
+                os.remove(p)
+    assert rb.git_state() == before
 
 
 def test_task_file_is_well_formed():
