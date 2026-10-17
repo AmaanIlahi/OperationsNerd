@@ -17,11 +17,12 @@ import copy
 import json
 
 from agentic import config, store, template_store
-from agentic.anthropic_llm import call_structured, LLMError
+from agentic import llm
+from agentic.llm import LLMError, LLMResult
 from agentic.impact import compute_impacts
 from agentic.operations import (
     apply_each, apply_operations, describe, OperationError, OPERATION_NAMES,
-    MAX_OPERATIONS_PER_PROPOSAL,
+    MAX_OPERATIONS_PER_PROPOSAL, Operation,
 )
 from agentic.spec import FIELD_TYPES, CARDINALITIES
 from agentic.validator import validate_spec
@@ -30,9 +31,13 @@ from db import db as d
 MAX_MESSAGES = 40
 MAX_MESSAGE_CHARS = 4000
 MAX_REPLY_CHARS = 4000
+MAX_RETRY_ECHO_CHARS = 8000
 
-# The one LLM call. Tests replace this with a stub.
-run_llm = call_structured
+RETRY_PROMPT = """Your previous answer could not be used: {problem}
+Reply again with the same JSON shape ({{reply, operations}}), correcting the operations. If the request cannot be done, return an empty operations list and explain in the reply."""
+
+# The one LLM call; the provider comes from LLM_PROVIDER. Tests replace this with a stub.
+run_llm = llm.call_structured
 
 
 class ChangeError(Exception):
@@ -86,6 +91,8 @@ Rules:
 You never invent keys; the server generates them. To use something you create in the same list of operations, \
 give the creating operation a short `ref` and use that ref afterwards.
 - Allowed operations: {operations}.
+- Exact attributes per operation (any attribute not listed for an operation is refused; every required one must be present, `label` above all):
+{shapes}
 - Field types: {field_types}. select and multiselect need a non-empty options list; no other type takes options.
 - Labels must be unique within their scope (entity labels; field labels within one entity type), archived ones \
 included. If a label is taken by an archived item, restore it instead of creating a duplicate.
@@ -133,9 +140,26 @@ def _strip_keys(spec: dict) -> dict:
     }
 
 
+def operation_shapes() -> str:
+    """One line per operation: required and optional attributes, derived from
+    the operation models so the prompt cannot drift from the validator."""
+    lines = []
+    for model in Operation.__args__[0].__args__:
+        required, optional = [], []
+        for name, f in model.model_fields.items():
+            if name == "op":
+                continue
+            (required if f.is_required() else optional).append(f.alias or name)
+        op = model.model_fields["op"].annotation.__args__[0]
+        lines.append(f"  {op}: {', '.join(required) or '(none)'}"
+                     + (f"  [optional: {', '.join(optional)}]" if optional else ""))
+    return "\n".join(lines)
+
+
 def build_system_prompt(spec: dict, template: dict | None, rejections: list[dict]) -> str:
     return SYSTEM_PROMPT.format(
         operations=", ".join(OPERATION_NAMES),
+        shapes=operation_shapes(),
         field_types=", ".join(FIELD_TYPES),
         spec=json.dumps(spec, indent=1),
         template=json.dumps(_strip_keys(template), indent=1) if template else "none",
@@ -166,6 +190,18 @@ def _parse_model_output(text: str) -> tuple[str, list]:
             or not isinstance(data.get("operations"), list):
         raise ChangeError(502, "The assistant returned an unexpected answer; please try again")
     return data["reply"][:MAX_REPLY_CHARS], data["operations"]
+
+
+def _add(a, b):
+    return None if a is None and b is None else (a or 0) + (b or 0)
+
+
+def _retry_problem(raw_ops: list, outcome: dict) -> str | None:
+    """Why the first answer is worth one retry, or None. Only a proposal where
+    every operation was refused counts; a partly valid one is shown as is."""
+    if raw_ops and not outcome["applied"]:
+        return "Every operation you proposed was refused by the server: " + json.dumps(outcome["rejected"])
+    return None
 
 
 def _proposal_view(proposal_id: int, status: str, base_version: int, reply: str,
@@ -210,9 +246,30 @@ def chat(account_id: int, business_id: int, messages: list[dict]) -> dict:
         with d.get_conn() as conn:          # the provider did not answer: give the turn back
             store.refund_chat_turn(conn, account_id)
         raise ChangeError(502, f"The assistant is unavailable: {e}")
-    reply, raw_ops = _parse_model_output(result.text)
-
-    outcome = apply_each(spec, raw_ops)
+    chat_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+    try:
+        reply, raw_ops = _parse_model_output(result.text)
+        outcome = apply_each(spec, raw_ops)
+        problem = _retry_problem(raw_ops, outcome)
+    except ChangeError as e:
+        reply, raw_ops, outcome, problem = None, None, None, e.detail
+    if problem:
+        # One retry, telling the model what was wrong with its first answer.
+        try:
+            second = run_llm(system, chat_messages + [
+                {"role": "assistant", "content": (result.text or "")[:MAX_RETRY_ECHO_CHARS]},
+                {"role": "user", "content": RETRY_PROMPT.format(problem=problem)},
+            ], RESPONSE_SCHEMA)
+        except LLMError as e:
+            with d.get_conn() as conn:
+                store.refund_chat_turn(conn, account_id)
+            raise ChangeError(502, f"The assistant is unavailable: {e}")
+        result = LLMResult(second.text, second.model,
+                           _add(result.input_tokens, second.input_tokens),
+                           _add(result.output_tokens, second.output_tokens),
+                           result.latency_ms + second.latency_ms)
+        reply, raw_ops = _parse_model_output(second.text)   # still unreadable -> clear 502 to the chat
+        outcome = apply_each(spec, raw_ops)
     applied, rejected = outcome["applied"], outcome["rejected"]
     status = "pending" if applied else "no_changes"
 

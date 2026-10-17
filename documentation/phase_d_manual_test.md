@@ -4,7 +4,7 @@ Page: `/app`. Run the server from `operations_nerd/` and open http://127.0.0.1:8
 
 ```
 set SIGNUP_INVITE_CODE=let-me-in
-set ANTHROPIC_API_KEY=...        (needed for the chat steps)
+set GEMINI_API_KEY=...           (needed for the chat steps; or set LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY)
 uvicorn main:app --reload
 ```
 
@@ -58,7 +58,7 @@ Tick each step. "Expect" says what you should see.
 - [ ] Approve the second one, then the first. **Expect:** the first shows "Out of date" and a message telling you to ask again.
 
 ## 9. Failure and slow calls
-- [ ] Unset `ANTHROPIC_API_KEY`, restart, send a message. **Expect:** a red error and a **Try again** button; no crash.
+- [ ] Unset `GEMINI_API_KEY`, restart, send a message. **Expect:** a red error and a **Try again** button; no crash.
 - [ ] With a key set and a slow reply, after about 12 s the spinner text changes to "Still working…".
 
 ## 10. Empty business

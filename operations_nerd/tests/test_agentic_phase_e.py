@@ -21,6 +21,7 @@ REPO = os.path.join(ROOT, "..")
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
+os.environ["LLM_PROVIDER"] = "stub"      # tests never reach a real model
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from db import db as d
@@ -160,7 +161,7 @@ def test_page_rebuilds_conversation_from_saved_proposals():
 
 # ---------- startup configuration ----------
 
-PROD_OK = dict(APP_ENV="production", SESSION_SECRET="s" * 40, ANTHROPIC_API_KEY="key", CONFIG_AGENT_ENABLED=None)
+PROD_OK = dict(APP_ENV="production", LLM_PROVIDER="gemini", SESSION_SECRET="s" * 40, GEMINI_API_KEY="key", CONFIG_AGENT_ENABLED=None)
 
 
 def test_production_requires_secret_and_api_key():
@@ -170,13 +171,13 @@ def test_production_requires_secret_and_api_key():
         assert any("SESSION_SECRET is required" in p for p in config.check_environment())
     with env(**{**PROD_OK, "SESSION_SECRET": "short"}):
         assert any("at least 32" in p for p in config.check_environment())
-    with env(**{**PROD_OK, "ANTHROPIC_API_KEY": None}):
-        assert any("ANTHROPIC_API_KEY is required" in p for p in config.check_environment())
+    with env(**{**PROD_OK, "GEMINI_API_KEY": None}):
+        assert any("GEMINI_API_KEY is required" in p for p in config.check_environment())
     with env(**{**PROD_OK, "CONFIG_AGENT_ENABLED": "1"}):
         assert any("CONFIG_AGENT_ENABLED" in p for p in config.check_environment())
     with env(**{**PROD_OK, "CONFIG_AGENT_ENABLED": "0"}):                     # "set" at all is refused
         assert any("CONFIG_AGENT_ENABLED" in p for p in config.check_environment())
-    with env(**{**PROD_OK, "SESSION_SECRET": None, "ANTHROPIC_API_KEY": None, "CONFIG_AGENT_ENABLED": "1"}):
+    with env(**{**PROD_OK, "SESSION_SECRET": None, "GEMINI_API_KEY": None, "CONFIG_AGENT_ENABLED": "1"}):
         assert len(config.check_environment()) == 3                           # all problems reported together
         try:
             config.startup()
@@ -187,7 +188,7 @@ def test_production_requires_secret_and_api_key():
 
 
 def test_development_mode_is_lenient_but_bad_numbers_are_caught():
-    with env(APP_ENV=None, SESSION_SECRET=None, ANTHROPIC_API_KEY=None, CONFIG_AGENT_ENABLED="1",
+    with env(APP_ENV=None, SESSION_SECRET=None, GEMINI_API_KEY=None, CONFIG_AGENT_ENABLED="1",
              CHAT_DAILY_LIMIT=None, MAX_BODY_BYTES=None):
         assert config.check_environment() == []
         assert config.chat_daily_limit() == 50 and config.max_body_bytes() == 1024 * 1024
@@ -200,7 +201,7 @@ def test_development_mode_is_lenient_but_bad_numbers_are_caught():
 
 def _import_main(**environment):
     child_env = {k: v for k, v in os.environ.items()
-                 if k not in ("APP_ENV", "SESSION_SECRET", "ANTHROPIC_API_KEY", "CONFIG_AGENT_ENABLED", "DATABASE_PATH")}
+                 if k not in ("APP_ENV", "SESSION_SECRET", "GEMINI_API_KEY", "CONFIG_AGENT_ENABLED", "DATABASE_PATH")}
     child_env.update({k: v for k, v in environment.items() if v is not None})
     return subprocess.run([sys.executable, "-c", "import main; print('started', main.d_path if hasattr(main,'d_path') else '')"],
                           cwd=ROOT, env=child_env, capture_output=True, text=True, timeout=120)
@@ -209,14 +210,14 @@ def _import_main(**environment):
 def test_app_refuses_to_start_in_production_with_bad_config():
     bad = _import_main(APP_ENV="production")
     assert bad.returncode != 0 and "Refusing to start" in bad.stderr and "SESSION_SECRET" in bad.stderr
-    flagged = _import_main(APP_ENV="production", SESSION_SECRET="s" * 40, ANTHROPIC_API_KEY="k",
+    flagged = _import_main(APP_ENV="production", SESSION_SECRET="s" * 40, GEMINI_API_KEY="k",
                            CONFIG_AGENT_ENABLED="1", DATABASE_PATH=os.path.join(tempfile.mkdtemp(), "x.db"))
     assert flagged.returncode != 0 and "CONFIG_AGENT_ENABLED" in flagged.stderr
 
 
 def test_app_starts_with_database_path_from_env_and_creates_it():
     target = os.path.join(tempfile.mkdtemp(), "nested", "dir", "ops.db")
-    ok = _import_main(APP_ENV="production", SESSION_SECRET="s" * 40, ANTHROPIC_API_KEY="k", DATABASE_PATH=target)
+    ok = _import_main(APP_ENV="production", SESSION_SECRET="s" * 40, GEMINI_API_KEY="k", DATABASE_PATH=target)
     assert ok.returncode == 0, ok.stderr
     assert os.path.isfile(target)                                           # directory and schema created
     conn = sqlite3.connect(target)

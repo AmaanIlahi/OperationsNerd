@@ -17,9 +17,10 @@ Env vars: ANTHROPIC_API_KEY, ANTHROPIC_MODEL.
 import json
 import os
 import time
-from dataclasses import dataclass
 
 import httpx
+
+from agentic.llm import LLMError, LLMResult  # noqa: F401  (re-exported: tests and callers import them from here)
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -27,19 +28,6 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 TOOL_NAME = "submit_response"
 MAX_OUTPUT_TOKENS = 4096
 TIMEOUT_SECONDS = 90
-
-
-class LLMError(Exception):
-    pass
-
-
-@dataclass
-class LLMResult:
-    text: str                 # JSON text matching the requested schema
-    model: str
-    input_tokens: int | None
-    output_tokens: int | None
-    latency_ms: int
 
 
 def get_model() -> str:

@@ -13,6 +13,7 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+os.environ["LLM_PROVIDER"] = "stub"      # tests never reach a real model
 from fastapi.testclient import TestClient
 from db import db as d
 from main import app

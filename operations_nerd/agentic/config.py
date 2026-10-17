@@ -3,7 +3,10 @@ Environment configuration for the agentic CRM and the startup checks.
 
     APP_ENV=production        turns on the strict startup checks below
     DATABASE_PATH             SQLite file (default: db/operations_nerd.db next to the code)
-    ANTHROPIC_API_KEY         required in production
+    LLM_PROVIDER              gemini (default) | anthropic | stub
+    GEMINI_API_KEY            required in production when LLM_PROVIDER=gemini
+    GEMINI_MODEL              optional (see gemini_llm.py)
+    ANTHROPIC_API_KEY         required in production when LLM_PROVIDER=anthropic
     ANTHROPIC_MODEL           optional (see anthropic_llm.py)
     SIGNUP_INVITE_CODE        signup is refused unless this is set and matches (or ALLOW_OPEN_SIGNUP=1)
     SESSION_SECRET            required in production, at least 32 characters
@@ -106,8 +109,15 @@ def check_environment() -> list[str]:
             problems.append("SESSION_SECRET is required when APP_ENV=production")
         elif len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
             problems.append(f"SESSION_SECRET must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters")
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            problems.append("ANTHROPIC_API_KEY is required when APP_ENV=production")
+        from agentic import llm
+        try:
+            key_env = llm.required_key_env()
+        except llm.LLMError as e:
+            problems.append(str(e))
+        else:
+            if key_env and not os.environ.get(key_env):
+                problems.append(f"{key_env} is required when APP_ENV=production "
+                                f"(LLM_PROVIDER={llm.get_provider()})")
         if os.environ.get("CONFIG_AGENT_ENABLED", "").strip():
             problems.append("CONFIG_AGENT_ENABLED must not be set when APP_ENV=production "
                             "(it writes files into the pack folders)")

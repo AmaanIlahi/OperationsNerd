@@ -2,8 +2,13 @@
 #
 #   docker build -t operations-nerd .
 #   docker run -p 8000:8000 -v opsnerd-data:/data \
-#       -e APP_ENV=production -e SESSION_SECRET=... -e ANTHROPIC_API_KEY=... \
+#       -e APP_ENV=production -e SESSION_SECRET=... -e GEMINI_API_KEY=... \
 #       -e SIGNUP_INVITE_CODE=... operations-nerd
+#
+# LLM_PROVIDER picks the model provider: gemini (default, needs GEMINI_API_KEY,
+# optional GEMINI_MODEL), anthropic (needs ANTHROPIC_API_KEY, optional
+# ANTHROPIC_MODEL) or stub (no model). Keys are runtime env vars; never bake
+# them into the image.
 #
 # The SQLite file lives on a volume mounted at /data (DATABASE_PATH), never in
 # the image. See documentation/deployment.md.

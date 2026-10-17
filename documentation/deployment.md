@@ -28,8 +28,11 @@ Set these in the platform's dashboard (never commit them; `.env` is git-ignored 
 |---|---|---|
 | `APP_ENV` | yes | `production`. Turns on the strict startup checks and always-`Secure` cookies. |
 | `SESSION_SECRET` | yes | Random string, at least 32 characters. Keys the hash of session tokens. Changing it logs everyone out. |
-| `ANTHROPIC_API_KEY` | yes | API key for the assistant. |
-| `ANTHROPIC_MODEL` | no | Model id. Defaults to `claude-sonnet-5-5`. |
+| `LLM_PROVIDER` | no | `gemini` (default), `anthropic`, or `stub` (no model, no key; the assistant never proposes changes). |
+| `GEMINI_API_KEY` | yes when `LLM_PROVIDER=gemini` (the default) | Google AI Studio API key for the assistant. |
+| `GEMINI_MODEL` | no | Gemini model id. Defaults to `gemini-3.8-flash`. |
+| `ANTHROPIC_API_KEY` | yes when `LLM_PROVIDER=anthropic` | Anthropic API key for the assistant. |
+| `ANTHROPIC_MODEL` | no | Anthropic model id. Defaults to `claude-sonnet-5-5`. |
 | `SIGNUP_INVITE_CODE` | yes, in practice | Signup is **closed** unless this is set (the visitor must type it) or `ALLOW_OPEN_SIGNUP=1`. |
 | `DATABASE_PATH` | set by the Dockerfile | `/data/operations_nerd.db`. Only override it if the volume is mounted elsewhere. |
 | `PORT` | set by the platform | The container listens on it. `[UNVERIFIED]` Railway and Render both inject `PORT`; the Dockerfile falls back to 8000. |
@@ -40,8 +43,9 @@ Set these in the platform's dashboard (never commit them; `.env` is git-ignored 
 | `CONFIG_AGENT_ENABLED` | **must stay unset** | The app refuses to start in production if this is set at all. |
 
 The app **refuses to start** (and the deploy shows the reason in the logs) when `APP_ENV=production` and
-`SESSION_SECRET` or `ANTHROPIC_API_KEY` is missing, `SESSION_SECRET` is shorter than 32 characters, or
-`CONFIG_AGENT_ENABLED` is set.
+`SESSION_SECRET` or the selected provider's API key (`GEMINI_API_KEY` by default) is missing,
+`LLM_PROVIDER` is not one of `gemini`, `anthropic`, `stub`, `SESSION_SECRET` is shorter than 32 characters,
+or `CONFIG_AGENT_ENABLED` is set.
 
 ### Generate the secrets
 
@@ -58,9 +62,11 @@ unaffected. Signup attempts are rate limited per address and per email, so the c
 
 ## 3. Set a spend limit on the API key (do this before sharing the link)
 
-1. Open the Anthropic Console (console.anthropic.com), sign in, and go to the workspace that owns the key.
+1. Open the console of the provider you chose: Google AI Studio / Google Cloud for Gemini
+   (aistudio.google.com), or console.anthropic.com for Anthropic. Go to the project or workspace that owns the key.
 2. Create a **dedicated API key** for this deployment, so it can be revoked on its own.
-3. Set a **monthly spend limit** for the workspace/organization in the Console's limits/billing settings.
+3. Set a **monthly spend limit** (Gemini: a budget/quota on the Google Cloud project behind the key) for the
+   workspace/project in the console's limits/billing settings.
    `[UNVERIFIED]` The exact menu names change; look for "Limits" or "Spend limits" and set a hard monthly cap
    at an amount you are comfortable losing.
 4. Optionally set a lower per-day figure with `CHAT_DAILY_LIMIT` (each account can use at most that many
