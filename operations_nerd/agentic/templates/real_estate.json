@@ -1,0 +1,78 @@
+{
+  "business": { "name": "Real Estate Agency", "industry": "real_estate" },
+  "entities": [
+    {
+      "key": "crm_client",
+      "label": "Client",
+      "archived": false,
+      "fields": [
+        { "key": "f_client_name", "label": "Full name", "type": "text", "required": true, "archived": false },
+        { "key": "f_client_email", "label": "Email", "type": "email", "required": false, "archived": false },
+        { "key": "f_client_phone", "label": "Phone", "type": "phone", "required": false, "archived": false },
+        { "key": "f_client_type", "label": "Client type", "type": "select",
+          "options": ["Buyer", "Seller", "Landlord", "Tenant"], "required": false, "archived": false },
+        { "key": "f_client_budget", "label": "Budget", "type": "number", "required": false, "archived": false },
+        { "key": "f_client_prop_types", "label": "Property types of interest", "type": "multiselect",
+          "options": ["Condo", "Single family", "Townhouse", "Multi-family", "Land", "Commercial"],
+          "required": false, "archived": false },
+        { "key": "f_client_notes", "label": "Notes", "type": "long_text", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_lead",
+      "label": "Lead",
+      "archived": false,
+      "fields": [
+        { "key": "f_lead_name", "label": "Full name", "type": "text", "required": true, "archived": false },
+        { "key": "f_lead_email", "label": "Email", "type": "email", "required": false, "archived": false },
+        { "key": "f_lead_phone", "label": "Phone", "type": "phone", "required": false, "archived": false },
+        { "key": "f_lead_source", "label": "Source", "type": "select",
+          "options": ["Website", "Open house", "Referral", "Sign call", "Other"],
+          "required": false, "archived": false },
+        { "key": "f_lead_stage", "label": "Stage", "type": "select",
+          "options": ["New", "Contacted", "Qualified", "Converted", "Lost"],
+          "required": false, "archived": false },
+        { "key": "f_lead_followup", "label": "Next follow-up", "type": "date", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_property",
+      "label": "Property",
+      "archived": false,
+      "fields": [
+        { "key": "f_prop_address", "label": "Address", "type": "text", "required": true, "archived": false },
+        { "key": "f_prop_type", "label": "Property type", "type": "select",
+          "options": ["Condo", "Single family", "Townhouse", "Multi-family", "Land", "Commercial"],
+          "required": false, "archived": false },
+        { "key": "f_prop_status", "label": "Status", "type": "select",
+          "options": ["Prospective", "Listed", "Under contract", "Sold", "Withdrawn"],
+          "required": false, "archived": false },
+        { "key": "f_prop_price", "label": "List price", "type": "number", "required": false, "archived": false },
+        { "key": "f_prop_bedrooms", "label": "Bedrooms", "type": "number", "required": false, "archived": false },
+        { "key": "f_prop_listed", "label": "Listed on", "type": "date", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_showing",
+      "label": "Showing",
+      "archived": false,
+      "fields": [
+        { "key": "f_show_date", "label": "Date", "type": "date", "required": true, "archived": false },
+        { "key": "f_show_outcome", "label": "Outcome", "type": "select",
+          "options": ["Scheduled", "Completed", "No-show", "Offer made"],
+          "required": false, "archived": false },
+        { "key": "f_show_feedback", "label": "Feedback", "type": "long_text", "required": false, "archived": false }
+      ]
+    }
+  ],
+  "links": [
+    { "key": "l_property_owner", "label": "Owner", "from": "crm_property", "to": "crm_client",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_showing_property", "label": "Property shown", "from": "crm_showing", "to": "crm_property",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_showing_client", "label": "Attended by", "from": "crm_showing", "to": "crm_client",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_lead_property", "label": "Interested in", "from": "crm_lead", "to": "crm_property",
+      "cardinality": "many_to_one", "archived": false }
+  ]
+}

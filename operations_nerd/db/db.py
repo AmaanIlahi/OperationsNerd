@@ -13,7 +13,7 @@ import json
 import os
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "operations_nerd.db")
+DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.path.dirname(__file__), "operations_nerd.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 
@@ -21,9 +21,19 @@ def init_db(db_path: str = DB_PATH, reset: bool = False):
     """Create the database and apply schema.sql. If reset=True, wipes any existing file first."""
     if reset and os.path.exists(db_path):
         os.remove(db_path)
+    if reset:
+        for sidecar in (db_path + "-wal", db_path + "-shm"):
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
     with open(SCHEMA_PATH, "r") as f:
         conn.executescript(f.read())
+    business_columns = {r[1] for r in conn.execute("PRAGMA table_info(businesses)")}
+    if "owner_key" not in business_columns:
+        conn.execute("ALTER TABLE businesses ADD COLUMN owner_key TEXT")
+    if "current_version" not in business_columns:
+        conn.execute("ALTER TABLE businesses ADD COLUMN current_version INTEGER")
     conn.commit()
     conn.close()
 
@@ -32,6 +42,7 @@ def init_db(db_path: str = DB_PATH, reset: bool = False):
 def get_conn(db_path: str = DB_PATH):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
@@ -109,6 +120,12 @@ def find_entity_ids_by_attribute(conn, entity_type: str, attribute_name: str, va
     return [r["entity_id"] for r in rows]
 
 
+def _require_business_reference(conn, table: str, row_id: int, business_id: int):
+    row = conn.execute(f"SELECT business_id FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    if row is None or row["business_id"] != business_id:
+        raise ValueError(f"{table} reference does not belong to business {business_id}")
+
+
 # ---------- contacts ----------
 
 def create_contact(conn, business_id: int, name: str, email: str = None,
@@ -173,6 +190,7 @@ def list_contacts(conn, business_id: int) -> list[dict]:
 
 def create_follow_up(conn, business_id: int, contact_id: int, type_: str,
                       due_date: str = None, notes: str = None, extension_data: dict = None) -> int:
+    _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         """INSERT INTO follow_ups (business_id, contact_id, type, due_date, notes)
            VALUES (?, ?, ?, ?, ?)""",
@@ -222,6 +240,8 @@ def list_follow_ups(conn, business_id: int, status: str = None) -> list[dict]:
 # ---------- events ----------
 
 def create_event(conn, business_id: int, source: str, raw_content: str, contact_id: int = None) -> int:
+    if contact_id is not None:
+        _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         "INSERT INTO events (business_id, contact_id, source, raw_content) VALUES (?, ?, ?, ?)",
         (business_id, contact_id, source, raw_content),
@@ -254,6 +274,9 @@ def list_events(conn, business_id: int) -> list[dict]:
 
 def create_drafted_action(conn, event_id: int, business_id: int, action_type: str,
                            payload: dict, contact_id: int = None) -> int:
+    _require_business_reference(conn, "events", event_id, business_id)
+    if contact_id is not None:
+        _require_business_reference(conn, "contacts", contact_id, business_id)
     cur = conn.execute(
         """INSERT INTO drafted_actions (event_id, business_id, contact_id, action_type, payload)
            VALUES (?, ?, ?, ?, ?)""",
@@ -327,6 +350,149 @@ def list_approval_policies(conn, business_id: int) -> list[dict]:
         "SELECT * FROM approval_policies WHERE business_id = ? ORDER BY action_type", (business_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------- chat onboarding: owned businesses ----------
+#
+# owner_key scoping: a business with owner_key NULL (questionnaire-created)
+# never matches `owner_key = ?`, so these lookups can't reach it.
+
+def create_owned_business(conn, name: str, industry_pack: str, pack_version: str,
+                          settings: dict, owner_key: str) -> int:
+    cur = conn.execute(
+        """INSERT INTO businesses (name, industry_pack, pack_version, settings_json, owner_key)
+           VALUES (?, ?, ?, ?, ?)""",
+        (name, industry_pack, pack_version, json.dumps(settings), owner_key),
+    )
+    return cur.lastrowid
+
+
+def get_owned_business(conn, business_id: int, owner_key: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM businesses WHERE id = ? AND owner_key = ?", (business_id, owner_key)
+    ).fetchone()
+    return _row_to_dict(row, json_fields=("settings_json",)) if row else None
+
+
+def list_owned_businesses(conn, owner_key: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM businesses WHERE owner_key = ? ORDER BY created_at", (owner_key,)
+    ).fetchall()
+    return [_row_to_dict(r, json_fields=("settings_json",)) for r in rows]
+
+
+def update_business_settings(conn, business_id: int, owner_key: str, settings: dict) -> dict | None:
+    """Merges `settings` into settings_json (keys not mentioned are kept).
+    Returns the merged settings, or None if the business doesn't exist or
+    isn't owned by owner_key."""
+    # Ownership-filtered write first: sqlite3 only opens the implicit
+    # transaction on a write, so this makes the ownership check, read and
+    # merge below one transaction holding the write lock.
+    claimed = conn.execute(
+        "UPDATE businesses SET settings_json = settings_json WHERE id = ? AND owner_key = ?",
+        (business_id, owner_key),
+    )
+    if claimed.rowcount == 0:
+        return None
+    row = conn.execute(
+        "SELECT settings_json FROM businesses WHERE id = ?", (business_id,)
+    ).fetchone()
+    merged = {**json.loads(row["settings_json"]), **(settings or {})}
+    conn.execute(
+        "UPDATE businesses SET settings_json = ? WHERE id = ?",
+        (json.dumps(merged), business_id),
+    )
+    return merged
+
+
+# ---------- chat onboarding: entities (crm_* records) ----------
+#
+# Fields live in entity_attributes under the entity's own entity_type
+# (e.g. 'crm_lead'), so the same EAV helpers serve these records unchanged.
+
+def create_entity(conn, business_id: int, entity_type: str, attributes: dict = None) -> int:
+    cur = conn.execute(
+        "INSERT INTO entities (business_id, entity_type) VALUES (?, ?)",
+        (business_id, entity_type),
+    )
+    entity_id = cur.lastrowid
+    if attributes:
+        set_entity_attributes(conn, entity_type, entity_id, attributes)
+    return entity_id
+
+
+def get_entity(conn, entity_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
+    if not row:
+        return None
+    entity = dict(row)
+    entity["attributes"] = get_entity_attributes(conn, entity["entity_type"], entity_id)
+    return entity
+
+
+def get_owned_entity(conn, entity_id: int, owner_key: str) -> dict | None:
+    row = conn.execute(
+        """SELECT e.* FROM entities e
+           JOIN businesses b ON b.id = e.business_id
+           WHERE e.id = ? AND b.owner_key = ?""",
+        (entity_id, owner_key),
+    ).fetchone()
+    if not row:
+        return None
+    entity = dict(row)
+    entity["attributes"] = get_entity_attributes(conn, entity["entity_type"], entity_id)
+    return entity
+
+
+def list_entities(conn, business_id: int, entity_type: str = None) -> list[dict]:
+    # Same single-round-trip json_group_object pattern as list_contacts.
+    # The join matches on entity_type too, since entity_attributes rows are
+    # keyed by (entity_type, entity_id) and ids are only unique per type there.
+    where = "WHERE e.business_id = ?"
+    params: list = [business_id]
+    if entity_type:
+        where += " AND e.entity_type = ?"
+        params.append(entity_type)
+    rows = conn.execute(
+        f"""SELECT e.*,
+                   COALESCE(a.attrs_json, '{{}}') AS attributes_json
+            FROM entities e
+            LEFT JOIN (
+                SELECT entity_type, entity_id,
+                       json_group_object(attribute_name, value) AS attrs_json
+                FROM entity_attributes
+                GROUP BY entity_type, entity_id
+            ) a ON a.entity_type = e.entity_type AND a.entity_id = e.id
+            {where}
+            ORDER BY e.entity_type, e.id""",
+        params,
+    ).fetchall()
+    entities = []
+    for r in rows:
+        e = dict(r)
+        del e["attributes_json"]
+        e["attributes"] = {
+            k: json.loads(v) for k, v in json.loads(r["attributes_json"]).items()
+        }
+        entities.append(e)
+    return entities
+
+
+def update_entity_attributes(conn, entity_id: int, owner_key: str, attributes: dict) -> dict | None:
+    """Merges `attributes` into the entity (keys not mentioned are kept).
+    Returns the updated entity, or None if it doesn't exist or its business
+    isn't owned by owner_key."""
+    # Ownership-filtered write first, same reason as update_business_settings.
+    claimed = conn.execute(
+        """UPDATE entities SET updated_at = datetime('now')
+           WHERE id = ? AND business_id IN (SELECT id FROM businesses WHERE owner_key = ?)""",
+        (entity_id, owner_key),
+    )
+    if claimed.rowcount == 0:
+        return None
+    row = conn.execute("SELECT entity_type FROM entities WHERE id = ?", (entity_id,)).fetchone()
+    set_entity_attributes(conn, row["entity_type"], entity_id, attributes)
+    return get_entity(conn, entity_id)
 
 
 if __name__ == "__main__":

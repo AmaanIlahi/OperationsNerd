@@ -1,6 +1,8 @@
 # SQLite database
 operations_nerd/db/operations_nerd.db
 *.db
+*.db-wal
+*.db-shm
 *.sqlite3
 
 # Python

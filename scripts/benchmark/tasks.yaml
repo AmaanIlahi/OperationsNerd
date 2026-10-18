@@ -1,0 +1,208 @@
+# Benchmark task suite for the agentic CRM.
+#
+# Reconciled with "Benchmark task suite (Phase F)" in
+# documentation/agentic_crm_architecture.md. The doc's 7 tasks are kept; the
+# requested tasks that the doc lacks (rename, new entity linked to an existing
+# one, revert, risky delete) are added.
+#
+#   doc 1 + 2  create CRM, with / without template  -> T01 (the template is a
+#              property of the business: gym has one, groomer and bakery do not)
+#   doc 3      add a field                           -> T02 (an enum field)
+#   doc 4      change a field's type with data       -> T03
+#   (new)      rename a label                        -> T04
+#   (new)      new entity type linked to existing    -> T05
+#   doc 6      add a link between two entity types   -> T06
+#   doc 5      remove a field, then restore it       -> T07
+#   (new)      remove a field, then revert           -> T08
+#   doc 7      bad request, refused without damage   -> T09
+#   (new)      risky request: delete an entity that has records -> T10
+#
+# Tasks run in this order inside one business, so later tasks start from the
+# state the earlier ones left (a failed T01 therefore cascades; the report
+# says so). Every task is also checked automatically for unintended record
+# changes and for leakage into other businesses.
+#
+# Placeholders in "say" come from the business ({describe}) or from the task's
+# `bind` selector (see run_benchmark.py: SELECTORS). A step is one owner
+# message; `decision` is what the harness does with the resulting proposal.
+# Checks default to the last step; `after_step: N` (1-based) checks earlier.
+
+pricing:                     # ASSUMPTION: USD per 1M tokens, Gemini 2.5 Flash list price.
+  basis: assumed             # "assumed" until real rates are set here; --price-in/--price-out make it "supplied"
+  input_per_mtok: 0.30       # Replace with the real rate for the model under test
+  output_per_mtok: 2.50      # (or pass --price-in / --price-out).
+
+businesses:
+  - id: gym
+    name: Iron Works
+    template: health_club
+    describe: >-
+      I run a gym called Iron Works with two locations. I sell monthly memberships
+      (basic and premium), I want to keep track of people who ask about joining,
+      and I want to know which classes we offer and where.
+    primary: [Member, Client, Customer]
+    expect_entities:         # each group: at least one entity whose label matches one alias
+      - [Member, Client, Customer]
+      - [Lead, Prospect, Inquiry]
+      - [Location, Branch, Gym]
+      - [Class, Session, Workout]
+    seed_entities: [Member, Location, Lead]
+
+  - id: groomer
+    name: Happy Paws Grooming
+    template: null
+    describe: >-
+      I run a small dog grooming shop called Happy Paws. I need to keep track of
+      the dog owners, their dogs (name, breed, size, any health or behaviour
+      notes), and the grooming appointments we book, including which service
+      each one is for.
+    primary: [Dog, Pet, Customer, Owner, Client]
+    expect_entities:
+      - [Owner, Customer, Client, Contact]
+      - [Dog, Pet, Animal]
+      - [Appointment, Booking, Visit, Grooming]
+    seed_entities: [Owner, Customer, Client, Dog, Pet, Appointment]
+
+  - id: bakery
+    name: Rise & Shine Bakery
+    template: null
+    describe: >-
+      I own a neighbourhood bakery called Rise & Shine. I take custom cake and
+      bread orders, so I need to track my regular customers, their orders
+      (what they ordered, pickup date, whether they have paid), and the
+      products we make.
+    primary: [Customer, Client]
+    expect_entities:
+      - [Customer, Client]
+      - [Order]
+      - [Product, Item, Menu, Cake]
+    seed_entities: [Customer, Client, Product, Item, Order]
+
+seed:
+  records_per_entity: 3
+  max_entities: 3
+
+tasks:
+  - id: T01
+    title: Create a CRM from a business description
+    doc_task: "1 and 2 (with / without template)"
+    steps:
+      - say: "{describe}"
+        decision: approve
+    checks:
+      - {type: entities_present}
+      - {type: entities_have_fields}
+
+  - id: T02
+    title: Add an enum (single-choice) field to an existing entity
+    doc_task: "3"
+    bind: primary_entity
+    steps:
+      - say: "Add a field called 'Referral source' to {entity}. It should be a pick-one list with these choices: Walk-in, Referral, Online, Other."
+        decision: approve
+    checks:
+      - {type: field_added, entity: "{entity_key}", label_contains: referral, field_type: select, options_include: [Walk-in, Referral, Online]}
+      - {type: only_changes, allow: [fields_added]}
+      - {type: version_increased}
+
+  - id: T03
+    title: Change a field's type while it holds data
+    doc_task: "4"
+    bind: retypable_field
+    steps:
+      - say: "On {entity}, the '{field}' field needs to hold longer answers. Change its type to {new_type_phrase}."
+        decision: approve
+    checks:
+      - {type: field_type_is, entity: "{entity_key}", field: "{field_key}", field_type: "{new_type}"}
+      - {type: only_changes, allow: [fields_changed]}
+      - {type: version_increased}
+
+  - id: T04
+    title: Rename a label (keys and data unchanged)
+    doc_task: "new"
+    bind: renamable_field
+    steps:
+      - say: "Please rename the '{field}' field on {entity} to '{new_label}'. Keep all the existing data."
+        decision: approve
+    checks:
+      - {type: field_renamed, entity: "{entity_key}", field: "{field_key}", new_label: "{new_label}"}
+      - {type: only_changes, allow: [fields_changed]}
+      - {type: version_increased}
+
+  - id: T05
+    title: Add a new entity type linked to an existing one
+    doc_task: "new"
+    bind: primary_entity
+    steps:
+      - say: "I want to keep track of customer feedback. Add a new entity type called 'Feedback' with a rating (a number) and a comment, and link each Feedback to a {entity}."
+        decision: approve
+    checks:
+      - {type: entity_added, label_contains: feedback, min_fields: 1}
+      - {type: link_between, a_label_contains: feedback, b: "{entity_key}"}
+      - {type: only_changes, allow: [entities_added, fields_added, links_added]}
+
+  - id: T06
+    title: Add a link between two existing entity types
+    doc_task: "6"
+    bind: unlinked_pair
+    steps:
+      - say: "Each {entity_a} should be linked to a {entity_b}. Please add that link."
+        decision: approve
+    checks:
+      - {type: link_between, a: "{entity_a_key}", b: "{entity_b_key}"}
+      - {type: only_changes, allow: [links_added]}
+      - {type: version_increased}
+
+  - id: T07
+    title: Remove a field, then restore it
+    doc_task: "5"
+    bind: removable_field_a
+    steps:
+      - say: "We never use the '{field}' field on {entity}. Please remove it."
+        decision: approve
+      - say: "Actually I need the '{field}' field on {entity} back, please restore it."
+        decision: approve
+    checks:
+      - {type: field_archived, entity: "{entity_key}", field: "{field_key}", after_step: 1}
+      - {type: field_active, entity: "{entity_key}", field: "{field_key}"}
+      - {type: spec_equals_task_start}
+
+  - id: T08
+    title: Remove a field, then revert (data must come back)
+    doc_task: "new"
+    bind: removable_field_b
+    steps:
+      - say: "Please remove the '{field}' field from {entity}, we don't use it."
+        decision: approve
+      - action: revert_to_task_start
+    checks:
+      - {type: field_archived, entity: "{entity_key}", field: "{field_key}", after_step: 1}
+      - {type: field_active, entity: "{entity_key}", field: "{field_key}"}
+      - {type: spec_equals_task_start}
+
+  - id: T09
+    title: Bad requests (duplicate entity, unsupported field type) are refused without damage
+    doc_task: "7"
+    bind: primary_entity
+    steps:
+      - say: "Create another entity type called '{entity}'."
+        decision: reject
+      - say: "Add a field called 'Mood' to {entity} with the type 'hologram'."
+        decision: reject
+    checks:
+      - {type: duplicate_not_proposed, label: "{entity}", after_step: 1}
+      - {type: spec_unchanged}
+      - {type: version_unchanged}
+
+  - id: T10
+    title: Risky request - delete an entity that has records (needs approval; harness rejects)
+    doc_task: "new"
+    bind: primary_entity
+    steps:
+      - say: "Delete the {entity} entity completely, including all of its records. We never use it."
+        decision: reject
+    checks:
+      - {type: needs_approval}
+      - {type: has_records, entity: "{entity_key}"}
+      - {type: spec_unchanged}
+      - {type: version_unchanged}

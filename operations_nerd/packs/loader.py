@@ -47,6 +47,13 @@ class EventSchema(BaseModel):
     valid_action_types: list[str]
 
 
+class EntitySchema(BaseModel):
+    entity_type: str
+    label: str
+    fields: list[str]
+    required: list[str] = []
+
+
 class Pack(BaseModel):
     id: str
     version: str
@@ -55,6 +62,7 @@ class Pack(BaseModel):
     event_schemas: list[EventSchema]
     prompts: dict[str, str]
     approval_defaults: dict[str, bool]
+    entity_schemas: list[EntitySchema] = []   # empty when the pack has no entity_schemas.yaml
 
 
 class PackLoadError(Exception):
@@ -96,6 +104,14 @@ def load_pack(pack_id: str, packs_dir: str = None) -> Pack:
     except yaml.YAMLError as e:
         raise PackLoadError(pack_id, [f"Invalid YAML syntax: {e}"])
 
+    entity_schemas = {}
+    entity_schemas_path = os.path.join(pack_dir, "entity_schemas.yaml")
+    if os.path.isfile(entity_schemas_path):
+        try:
+            entity_schemas = _read_yaml(entity_schemas_path)
+        except yaml.YAMLError as e:
+            raise PackLoadError(pack_id, [f"Invalid YAML syntax in entity_schemas.yaml: {e}"])
+
     try:
         pack = Pack(
             id=meta.get("id"),
@@ -105,6 +121,7 @@ def load_pack(pack_id: str, packs_dir: str = None) -> Pack:
             event_schemas=event_schemas.get("schemas", []),
             prompts=prompts.get("templates", {}),
             approval_defaults=approval_defaults.get("defaults", {}),
+            entity_schemas=entity_schemas.get("entities", []),
         )
     except ValidationError as e:
         # Pydantic's own errors, one per malformed field, structural only.
@@ -177,6 +194,36 @@ def validate_pack(pack: Pack) -> list[str]:
             issues.append(
                 f"approval_defaults.yaml has a default for '{action_type}', "
                 f"but no event schema declares it as a valid_action_type"
+            )
+
+    # 4. entity_type values must be unique, since they form the enum the
+    #    chat agent is constrained to and the key entity records are stored under.
+    seen_entity_types = set()
+    for schema in pack.entity_schemas:
+        if schema.entity_type in seen_entity_types:
+            issues.append(
+                f"entity_schemas.yaml declares entity_type '{schema.entity_type}' more than once"
+            )
+        seen_entity_types.add(schema.entity_type)
+
+    # 5. Every required field of an entity must be one of its declared fields.
+    for schema in pack.entity_schemas:
+        for field in schema.required:
+            if field not in schema.fields:
+                issues.append(
+                    f"entity_schemas '{schema.entity_type}' requires '{field}', "
+                    f"but it is not in that entity's fields"
+                )
+
+    # 6. entity_type must be crm_-prefixed. Entity fields share the
+    #    entity_attributes table with the core 'contact' / 'follow_up' rows,
+    #    keyed by (entity_type, entity_id), and ids overlap across tables, so an
+    #    unprefixed type could read and overwrite another table's attributes.
+    for schema in pack.entity_schemas:
+        if not schema.entity_type.startswith("crm_"):
+            issues.append(
+                f"entity_schemas entity_type '{schema.entity_type}' must start with 'crm_' "
+                f"(e.g. 'crm_{schema.entity_type}') so it can't collide with core entity types"
             )
 
     return issues

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Operations Nerd — Config-Change Agent Demo</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #fafaf8;
+    color: #2b2b28;
+    margin: 0;
+    padding: 24px 32px 64px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { color: #706f68; font-size: 13px; margin-bottom: 20px; }
+
+  .columns { display: flex; gap: 20px; align-items: flex-start; }
+  .col { flex: 1; min-width: 0; }
+
+  section {
+    background: #fff; border: 1px solid #e6e5e0; border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  section h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #55544d; }
+
+  label { display: block; font-size: 13px; margin: 10px 0 4px; font-weight: 600; }
+  select, textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid #ccc;
+    border-radius: 6px; font-size: 13px; box-sizing: border-box; font-family: inherit;
+  }
+  textarea { min-height: 70px; resize: vertical; }
+
+  button {
+    margin-top: 12px; padding: 8px 16px; border: none; border-radius: 6px;
+    background: #2b2b28; color: #fff; font-size: 13px; cursor: pointer;
+  }
+  button.secondary { background: #eceae3; color: #2b2b28; margin-left: 8px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .errors { color: #b3261e; font-size: 13px; margin-top: 10px; }
+  .errors ul { margin: 4px 0 0; padding-left: 18px; }
+
+  .question-list { list-style: none; margin: 0; padding: 0; }
+  .question-list li {
+    padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px;
+  }
+  .question-list li:last-child { border-bottom: none; }
+  .q-label { display: block; }
+  .q-type { color: #918f86; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .empty-note { color: #918f86; font-size: 12.5px; font-style: italic; }
+
+  pre.diff {
+    background: #1e1e1c; color: #ddd; padding: 12px 14px; border-radius: 8px;
+    font-size: 12px; overflow-x: auto; white-space: pre; margin: 0;
+  }
+  pre.diff .add { color: #7ee787; }
+  pre.diff .del { color: #ff8880; }
+
+  .validation-pass { color: #1a7f37; font-weight: 600; font-size: 13px; margin-top: 10px; }
+  .validation-fail { color: #b3261e; font-weight: 600; font-size: 13px; margin-top: 10px; }
+
+  .explanation { font-size: 12.5px; color: #55544d; margin-top: 8px; }
+  .applied-note { color: #1a7f37; font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Operations Nerd — Config-Change Agent Demo</h1>
+<div class="subtitle">Describe a Config Pack change in plain English. The agent proposes one file edit, validated against a throwaway copy of the pack before anything real is touched.</div>
+
+<div class="columns">
+  <div class="col">
+    <section>
+      <h2>Pack</h2>
+      <label>Config Pack</label>
+      <select id="packId"></select>
+      <div id="questionnaireContainer"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section>
+      <h2>Propose a change</h2>
+      <label>What do you want to change?</label>
+      <textarea id="requestText" placeholder="e.g. Add a question asking which days of the week the gym is open"></textarea>
+      <button id="proposeBtn">Propose</button>
+      <div class="errors" id="proposeErrors"></div>
+
+      <div id="proposalOutput"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// Safe DOM builder, same pattern as frontend/index.html: text and attrs
+// always go through textContent / setAttribute, so pack content and LLM
+// output are rendered as literal text, never parsed as HTML.
+function el(tag, opts = {}) {
+  const node = document.createElement(tag);
+  if (opts.className) node.className = opts.className;
+  if (opts.text != null) node.textContent = String(opts.text);
+  if (opts.attrs) {
+    for (const [k, v] of Object.entries(opts.attrs)) {
+      if (v == null) continue;
+      node.setAttribute(k, String(v));
+    }
+  }
+  if (opts.on) {
+    for (const [evt, fn] of Object.entries(opts.on)) {
+      node.addEventListener(evt, fn);
+    }
+  }
+  if (opts.children) {
+    for (const c of opts.children) {
+      if (c == null) continue;
+      node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+  }
+  return node;
+}
+
+function setChildren(container, children) {
+  container.replaceChildren();
+  for (const c of children) container.appendChild(c);
+}
+
+let currentProposal = null; // { file, proposed_content, base_hash }
+
+// ---------- left column: pack + questionnaire ----------
+
+async function loadPackOptions() {
+  const select = $('packId');
+  try {
+    const resp = await fetch('/packs');
+    const packs = await resp.json();
+    setChildren(select, packs.map(p =>
+      el('option', { attrs: { value: p.id }, text: p.display_name })
+    ));
+  } catch (e) {
+    $('proposeErrors').textContent = `Error loading packs: ${e}`;
+    return;
+  }
+  loadQuestionnaire();
+}
+
+async function loadQuestionnaire() {
+  const packId = $('packId').value;
+  const container = $('questionnaireContainer');
+  if (!packId) { container.replaceChildren(); return; }
+  try {
+    const resp = await fetch(`/packs/${packId}/questionnaire`);
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      setChildren(container, [el('div', { className: 'errors', text: `Failed to load questionnaire: ${body.detail || resp.statusText}` })]);
+      return;
+    }
+    const data = await resp.json();
+    renderQuestionnaire(data.questions);
+  } catch (e) {
+    setChildren(container, [el('div', { className: 'errors', text: `Error: ${e}` })]);
+  }
+}
+
+function renderQuestionnaire(questions) {
+  const container = $('questionnaireContainer');
+  if (!questions || questions.length === 0) {
+    setChildren(container, [el('div', { className: 'empty-note', text: 'No questions in this pack yet.' })]);
+    return;
+  }
+  const items = questions.map(q => el('li', {
+    children: [
+      el('span', { className: 'q-label', text: q.label }),
+      el('span', { className: 'q-type', text: q.type }),
+    ],
+  }));
+  setChildren(container, [el('ul', { className: 'question-list', children: items })]);
+}
+
+$('packId').addEventListener('change', loadQuestionnaire);
+loadPackOptions();
+
+// ---------- right column: propose / apply ----------
+
+function renderDiff(diffText) {
+  const pre = document.createElement('pre');
+  pre.className = 'diff';
+  if (!diffText) {
+    pre.textContent = '(no textual change)';
+    return pre;
+  }
+  const lines = diffText.split('\n');
+  for (const line of lines) {
+    const span = document.createElement('span');
+    if (line.startsWith('+') && !line.startsWith('+++')) span.className = 'add';
+    else if (line.startsWith('-') && !line.startsWith('---')) span.className = 'del';
+    span.textContent = line;
+    pre.appendChild(span);
+    pre.appendChild(document.createTextNode('\n'));
+  }
+  return pre;
+}
+
+async function proposeChange() {
+  $('proposeErrors').replaceChildren();
+  $('proposalOutput').replaceChildren();
+  currentProposal = null;
+
+  const packId = $('packId').value;
+  const requestText = $('requestText').value.trim();
+  if (!requestText) { $('proposeErrors').textContent = 'Describe the change first.'; return; }
+
+  $('proposeBtn').disabled = true;
+  try {
+    const resp = await fetch('/config-agent/propose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pack_id: packId, request: requestText }),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      $('proposeErrors').textContent = `Error: ${body.detail || resp.statusText}`;
+      return;
+    }
+    renderProposal(body);
+  } catch (e) {
+    $('proposeErrors').textContent = `Error: ${e}`;
+  } finally {
+    $('proposeBtn').disabled = false;
+  }
+}
+$('proposeBtn').addEventListener('click', proposeChange);
+
+function renderProposal(body) {
+  const output = $('proposalOutput');
+  const nodes = [];
+
+  nodes.push(el('div', { className: 'explanation', text: `Proposed change to ${body.file}: ${body.explanation}` }));
+  nodes.push(renderDiff(body.diff));
+
+  if (body.validation === 'pass') {
+    nodes.push(el('div', { className: 'validation-pass', text: 'Validation: PASS' }));
+  } else {
+    nodes.push(el('div', { className: 'validation-fail', text: 'Validation: FAIL' }));
+    nodes.push(el('ul', { className: 'errors', children: (body.errors || []).map(e => el('li', { text: e })) }));
+  }
+
+  const applyBtn = el('button', { text: 'Apply', on: { click: applyChange } });
+  applyBtn.disabled = body.validation !== 'pass';
+  const discardBtn = el('button', { className: 'secondary', text: 'Discard', on: { click: discardProposal } });
+  nodes.push(el('div', { children: [applyBtn, discardBtn] }));
+
+  setChildren(output, nodes);
+
+  if (body.validation === 'pass') {
+    currentProposal = {
+      pack_id: $('packId').value,
+      file: body.file,
+      proposed_content: body.proposed_content,
+      base_hash: body.base_hash,
+    };
+  }
+}
+
+function discardProposal() {
+  currentProposal = null;
+  $('proposalOutput').replaceChildren();
+  $('requestText').value = '';
+}
+
+async function applyChange() {
+  if (!currentProposal) return;
+  $('proposeErrors').replaceChildren();
+  try {
+    const resp = await fetch('/config-agent/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentProposal),
+    });
+    const body = await resp.json();
+    if (!resp.ok) {
+      $('proposeErrors').textContent = `Could not apply: ${body.detail || resp.statusText}`;
+      return;
+    }
+    setChildren($('proposalOutput'), [el('div', { className: 'applied-note', text: `Applied. ${body.file} updated.` })]);
+    currentProposal = null;
+    loadQuestionnaire();
+  } catch (e) {
+    $('proposeErrors').textContent = `Error: ${e}`;
+  }
+}
+</script>
+
+</body>
+</html>

@@ -10,3 +10,5 @@ different industries — real estate, a health club, etc. — just by swapping
 out a config file, with no changes to the underlying code.
 
 Currently supports two example industries: **Real Estate** and **Health Club**.
+
+**Contributing:** see [documentation/CONTRIBUTING.md](documentation/CONTRIBUTING.md) for local setup, tests, the benchmark, and branch and PR rules.

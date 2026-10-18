@@ -1,0 +1,15 @@
+entities:
+  - entity_type: crm_account
+    label: Account
+    fields: [name, account_type, phone, email, address]
+    required: [name]
+
+  - entity_type: crm_contact
+    label: Contact
+    fields: [first_name, last_name, email, phone, account_name, membership_type]
+    required: [first_name]
+
+  - entity_type: crm_lead
+    label: Lead
+    fields: [name, email, phone, source, status, membership_interest, fitness_goal]
+    required: [name]

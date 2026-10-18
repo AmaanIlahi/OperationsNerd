@@ -1,0 +1,73 @@
+{
+  "business": { "name": "Health Club", "industry": "health_club" },
+  "entities": [
+    {
+      "key": "crm_location",
+      "label": "Location",
+      "archived": false,
+      "fields": [
+        { "key": "f_location_name", "label": "Name", "type": "text", "required": true, "archived": false },
+        { "key": "f_location_address", "label": "Address", "type": "long_text", "required": false, "archived": false },
+        { "key": "f_location_phone", "label": "Phone", "type": "phone", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_member",
+      "label": "Member",
+      "archived": false,
+      "fields": [
+        { "key": "f_member_name", "label": "Full name", "type": "text", "required": true, "archived": false },
+        { "key": "f_member_email", "label": "Email", "type": "email", "required": false, "archived": false },
+        { "key": "f_member_phone", "label": "Phone", "type": "phone", "required": false, "archived": false },
+        { "key": "f_member_membership", "label": "Membership", "type": "select",
+          "options": ["Basic", "Premium", "Family"], "required": false, "archived": false },
+        { "key": "f_member_status", "label": "Status", "type": "select",
+          "options": ["Active", "Frozen", "Cancelled"], "required": false, "archived": false },
+        { "key": "f_member_joined", "label": "Join date", "type": "date", "required": false, "archived": false },
+        { "key": "f_member_goals", "label": "Fitness goals", "type": "multiselect",
+          "options": ["Weight loss", "Strength", "Endurance", "Flexibility", "General health"],
+          "required": false, "archived": false },
+        { "key": "f_member_notes", "label": "Notes", "type": "long_text", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_lead",
+      "label": "Lead",
+      "archived": false,
+      "fields": [
+        { "key": "f_lead_name", "label": "Full name", "type": "text", "required": true, "archived": false },
+        { "key": "f_lead_email", "label": "Email", "type": "email", "required": false, "archived": false },
+        { "key": "f_lead_phone", "label": "Phone", "type": "phone", "required": false, "archived": false },
+        { "key": "f_lead_source", "label": "Source", "type": "select",
+          "options": ["Walk-in", "Website", "Referral", "Social media", "Other"],
+          "required": false, "archived": false },
+        { "key": "f_lead_stage", "label": "Stage", "type": "select",
+          "options": ["New", "Contacted", "Tour booked", "Trial", "Joined", "Lost"],
+          "required": false, "archived": false },
+        { "key": "f_lead_trial", "label": "Trial days", "type": "number", "required": false, "archived": false },
+        { "key": "f_lead_followup", "label": "Next follow-up", "type": "date", "required": false, "archived": false }
+      ]
+    },
+    {
+      "key": "crm_class",
+      "label": "Class",
+      "archived": false,
+      "fields": [
+        { "key": "f_class_name", "label": "Name", "type": "text", "required": true, "archived": false },
+        { "key": "f_class_instructor", "label": "Instructor", "type": "text", "required": false, "archived": false },
+        { "key": "f_class_capacity", "label": "Capacity", "type": "number", "required": false, "archived": false },
+        { "key": "f_class_schedule", "label": "Schedule", "type": "text", "required": false, "archived": false }
+      ]
+    }
+  ],
+  "links": [
+    { "key": "l_member_location", "label": "Home location", "from": "crm_member", "to": "crm_location",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_lead_location", "label": "Interested location", "from": "crm_lead", "to": "crm_location",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_class_location", "label": "Held at", "from": "crm_class", "to": "crm_location",
+      "cardinality": "many_to_one", "archived": false },
+    { "key": "l_member_class", "label": "Attends", "from": "crm_member", "to": "crm_class",
+      "cardinality": "many_to_many", "archived": false }
+  ]
+}
