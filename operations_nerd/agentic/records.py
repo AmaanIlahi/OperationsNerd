@@ -59,7 +59,8 @@ def _display(entity: dict, attributes: dict, record_id: int) -> str:
     return f"#{record_id}"
 
 
-def _check_link_target(conn, business_id: int, spec: dict, link: dict, raw) -> tuple[int | None, str | None]:
+def _check_link_target(conn, business_id: int, spec: dict, link: dict, raw,
+                       current_record_id: int | None = None) -> tuple[int | None, str | None]:
     if is_empty(raw):
         return None, None
     target = next(e for e in spec["entities"] if e["key"] == link["to"])
@@ -74,11 +75,24 @@ def _check_link_target(conn, business_id: int, spec: dict, link: dict, raw) -> t
         "SELECT 1 FROM entities WHERE id = ? AND business_id = ? AND entity_type = ?",
         (target_id, business_id, link["to"]),
     ).fetchone()
-    return (target_id, None) if found else (None, problem)
+    if not found:
+        return None, problem
+    if link["cardinality"] == "one_to_one":
+        source = next(e for e in spec["entities"] if e["key"] == link["from"])
+        for other_id in d.find_entity_ids_by_attribute(conn, link["from"], link["key"], target_id):
+            if other_id == current_record_id:
+                continue
+            other = conn.execute(
+                "SELECT 1 FROM entities WHERE id = ? AND business_id = ? AND entity_type = ?",
+                (other_id, business_id, link["from"]),
+            ).fetchone()
+            if other:
+                return None, f"{link['label']} already links to another {source['label']} record"
+    return target_id, None
 
 
 def _check_values(conn, business_id: int, spec: dict, entity: dict, values: dict,
-                  existing: dict | None) -> tuple[dict, dict]:
+                  existing: dict | None, current_record_id: int | None = None) -> tuple[dict, dict]:
     """Returns (cleaned changes, errors). `cleaned` maps field key -> coerced
     value, or None to clear the value. Required fields are checked against
     the result of merging the changes onto `existing`."""
@@ -87,7 +101,9 @@ def _check_values(conn, business_id: int, spec: dict, entity: dict, values: dict
     errors, cleaned = {}, {}
     for key, raw in values.items():
         if key in links:
-            target_id, problem = _check_link_target(conn, business_id, spec, links[key], raw)
+            target_id, problem = _check_link_target(
+                conn, business_id, spec, links[key], raw, current_record_id
+            )
             if problem:
                 errors[key] = problem
             else:
@@ -188,7 +204,9 @@ def update_record(account_id: int, business_id: int, entity_key: str, record_id:
     with d.get_conn() as conn:
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
         record = _owned_record(conn, business_id, entity_key, record_id)
-        cleaned, errors = _check_values(conn, business_id, spec, entity, values, record["attributes"])
+        cleaned, errors = _check_values(
+            conn, business_id, spec, entity, values, record["attributes"], record_id
+        )
         if errors:
             raise RecordError(422, errors)
         _write(conn, entity_key, record_id, cleaned)

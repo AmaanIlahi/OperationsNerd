@@ -49,6 +49,19 @@ def _uses_option(value, option) -> bool:
     return option in value if isinstance(value, list) else value == option
 
 
+def _link_values(conn, business_id: int, entity_key: str, link_key: str) -> list[tuple[int, object]]:
+    """(record id, target id) for records with a stored value for this link."""
+    rows = conn.execute(
+        """SELECT e.id, a.value FROM entities e
+           JOIN entity_attributes a
+             ON a.entity_type = e.entity_type AND a.entity_id = e.id AND a.attribute_name = ?
+           WHERE e.business_id = ? AND e.entity_type = ?
+           ORDER BY e.id""",
+        (link_key, business_id, entity_key),
+    ).fetchall()
+    return [(r["id"], json.loads(r["value"])) for r in rows]
+
+
 def compute_impact(conn, business_id: int, applied: dict) -> dict:
     """`applied` is one entry from operations.apply_each()["applied"]."""
     op, resolved, before = applied["op"], applied["resolved"], applied["spec_before"]
@@ -66,9 +79,16 @@ def compute_impact(conn, business_id: int, applied: dict) -> dict:
         out["link"] = resolved["link"]
         out["link_label"] = resolved.get("link_label")
 
-    # Links carry no record data in v1, so they change no records.
     if name in ("add_link", "archive_link", "restore_link"):
-        out["records_affected"] = 0
+        if name == "add_link":
+            out["records_affected"] = 0
+            return out
+        values = _non_empty(_link_values(conn, business_id, resolved["from"], resolved["link"]))
+        out["records_affected"] = len(values)
+        if name == "archive_link":
+            out["values_hidden"] = len(values)
+        else:
+            out["values_restored"] = len(values)
         return out
 
     records = _record_count(conn, business_id, entity_key)

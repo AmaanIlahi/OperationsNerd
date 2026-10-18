@@ -112,7 +112,7 @@ Run on the server for every proposal, before the owner sees it, and again on app
 ```
 POST /api/businesses/{id}/chat   { messages: [...full history] }
   1. Build context: current spec, industry template (if any), allowed operation types, field types
-  2. One Anthropic call with a tool/JSON schema that constrains output to:
+  2. One call to the configured provider (Gemini by default; Anthropic optional) with a JSON schema that constrains output to:
        { reply, operations: [...] }
   3. Validate + impact-check the operations
   4. Save as a pending proposal (base_version recorded); return reply + proposal + impact
@@ -123,7 +123,7 @@ POST /api/businesses/{id}/revert   { to_version } -> applies a new version equal
 
 - A proposal is refused on approve if the spec changed since it was made.
 - Operations that fail validation are dropped from the proposal and listed with the reason, so the owner sees what the agent tried and why it was refused.
-- Model and API key come from env vars (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`). The Anthropic provider lives in `agentic/anthropic_llm.py` (not `pipeline/`, which stays untouched). It has the same call shape as `call_llm(prompt, response_schema)` plus `call_structured(system, messages, schema)`, which also returns token usage and latency for the audit trail.
+- Provider and API key come from env vars. `LLM_PROVIDER=gemini` (the default) uses `GEMINI_API_KEY` and optional `GEMINI_MODEL`; `LLM_PROVIDER=anthropic` uses `ANTHROPIC_API_KEY` and optional `ANTHROPIC_MODEL`. The providers live in `agentic/gemini_llm.py` and `agentic/anthropic_llm.py` (not `pipeline/`, which stays untouched) and return token usage and latency for the audit trail.
 - Caps: 40 messages per request, 4,000 characters per message, 50 operations per proposal.
 - Proposal statuses: `pending`, `no_changes`, `approved`, `rejected`, `stale`.
 
@@ -150,7 +150,7 @@ proposals       (id, business_id, base_version, messages_json, reply, ops_json, 
 
 - `businesses` gains a `current_version` column (additive, nullable). `owner_key` from Phase 1 holds the account id.
 - Records reuse `entities` + `entity_attributes` from Phase 1. Attribute names are field **keys**, not labels.
-- Generic record endpoints: `POST/GET /api/businesses/{id}/records/{entity_key}`, `GET/PATCH .../records/{entity_key}/{record_id}`. Values are validated against the current spec; required is enforced on create and edit only.
+- Generic record endpoints: `POST/GET /api/businesses/{id}/records/{entity_key}`, `GET/PATCH .../records/{entity_key}/{record_id}`. Values are validated against the current spec; required is enforced on create and edit only. Editable `many_to_one` and `one_to_one` link targets must be records of the target type in the same business, and a `one_to_one` target cannot already be linked from another record.
 - `GET /api/businesses/{id}/versions/{n}` returns the full spec of one version (account-scoped).
 - `proposals` + `spec_versions` together are the audit trail (who asked, what was proposed, what was approved, tokens, latency).
 
@@ -165,7 +165,7 @@ proposals       (id, business_id, base_version, messages_json, reply, ops_json, 
 ## Deployment
 
 - Single service (Railway or Render) with a **persistent volume** for the SQLite file. WAL mode is already on.
-- Env vars: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `SIGNUP_INVITE_CODE`, `SESSION_SECRET`.
+- Env vars: `LLM_PROVIDER`, the selected provider key (`GEMINI_API_KEY` by default, or `ANTHROPIC_API_KEY`), the optional model override, `SIGNUP_INVITE_CODE`, `SESSION_SECRET`.
 - Set a monthly spend limit on the API key in the provider console.
 - `CONFIG_AGENT_ENABLED` stays unset in production.
 - Back up the SQLite file before each deploy.

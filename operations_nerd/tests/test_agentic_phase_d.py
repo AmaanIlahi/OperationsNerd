@@ -114,6 +114,44 @@ def test_link_value_roundtrip_and_display():
     add(g.c, g.id, g.member, {g.member_name: "Bob", g.home: str(g.loc_a["id"])})   # numeric string accepted
 
 
+def test_one_to_one_link_target_is_unique():
+    g = Gym(new_account())
+
+    def run(ops):
+        from agentic import chat
+        from agentic.anthropic_llm import LLMResult
+        chat.run_llm = lambda s, m, sc: LLMResult(json.dumps({"reply": "ok", "operations": ops}), "stub", 1, 1, 1)
+        p = g.c.post(f"/api/businesses/{g.id}/chat", json={"messages": [{"role": "user", "content": "go"}]}).json()
+        assert p["status"] == "pending", p
+        assert g.c.post(f"/api/proposals/{p['proposal_id']}/approve").status_code == 200
+
+    run([{"op": "add_link", "label": "Assigned location", "from": g.member,
+          "to": g.location, "cardinality": "one_to_one"}])
+    spec = g.c.get(f"/api/businesses/{g.id}").json()["spec"]
+    assigned = link(spec, "Assigned location")
+
+    first = add(g.c, g.id, g.member, {g.member_name: "Ann", assigned: g.loc_a["id"]})
+    r = g.c.post(f"/api/businesses/{g.id}/records/{g.member}",
+                 json={"values": {g.member_name: "Bob", assigned: g.loc_a["id"]}})
+    assert r.status_code == 422 and assigned in r.json()["detail"]
+
+    # Re-saving the same target on the same record is fine.
+    r = g.c.patch(f"/api/businesses/{g.id}/records/{g.member}/{first['id']}",
+                  json={"values": {assigned: g.loc_a["id"]}})
+    assert r.status_code == 200 and r.json()["links"][assigned]["id"] == g.loc_a["id"]
+
+    # Moving the first record frees the target for another record.
+    r = g.c.patch(f"/api/businesses/{g.id}/records/{g.member}/{first['id']}",
+                  json={"values": {assigned: g.loc_b["id"]}})
+    assert r.status_code == 200
+    second = add(g.c, g.id, g.member, {g.member_name: "Bob", assigned: g.loc_a["id"]})
+    r = g.c.patch(f"/api/businesses/{g.id}/records/{g.member}/{second['id']}",
+                  json={"values": {assigned: g.loc_b["id"]}})
+    assert r.status_code == 422 and assigned in r.json()["detail"]
+
+    assert g.c.get(f"/api/businesses/{g.id}/records/{g.member}").json()["total"] == 2
+
+
 def test_link_target_must_be_a_record_of_the_target_type_in_same_business():
     g = Gym(new_account())
     other_member = add(g.c, g.id, g.member, {g.member_name: "Not a location"})
