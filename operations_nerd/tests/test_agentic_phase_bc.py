@@ -364,6 +364,38 @@ def test_impact_numbers_with_seeded_records():
     assert snapshot(bid)["current_version"] == 1
 
 
+def test_impact_counts_link_values():
+    c = new_account()
+    biz = make_business(c, "health_club")
+    bid, spec = biz["id"], biz["spec"]
+    member = entity(spec, "Member")["key"]
+    location = entity(spec, "Location")["key"]
+    name_f = field(spec, "Member", "Full name")["key"]
+    loc_name_f = field(spec, "Location", "Name")["key"]
+    home = link(spec, "Home location")["key"]
+
+    def add(ent, values):
+        r = c.post(f"/api/businesses/{bid}/records/{ent}", json={"values": values})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    downtown = add(location, {loc_name_f: "Downtown"})
+    uptown = add(location, {loc_name_f: "Uptown"})
+    add(member, {name_f: "A", home: downtown["id"]})
+    add(member, {name_f: "B", home: uptown["id"]})
+    add(member, {name_f: "No home"})
+
+    imp = _impact(c, bid, {"op": "archive_link", "link": home})
+    assert imp["records_affected"] == 2 and imp["values_hidden"] == 2
+
+    apply_ops(c, bid, [{"op": "archive_link", "link": home}])
+    imp = _impact(c, bid, {"op": "restore_link", "link": home})
+    assert imp["records_affected"] == 2 and imp["values_restored"] == 2
+
+    imp = _impact(c, bid, {"op": "add_link", "label": "Second home", "from": member, "to": location})
+    assert imp["records_affected"] == 0
+
+
 def test_impact_sees_earlier_operations_in_same_proposal():
     c = new_account()
     biz = make_business(c)
