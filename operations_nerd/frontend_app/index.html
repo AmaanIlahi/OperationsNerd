@@ -797,8 +797,12 @@ const IMPACT_TEXT = {
   archive_field: (i) => [`${n(i.values_hidden, 'value')} hidden (kept) across ${n(i.records_affected, 'record')}`],
   restore_field: (i) => [`${n(i.values_restored, 'value')} shown again`],
   add_link: () => ['No record data affected'],
-  archive_link: () => ['No record data affected'],
-  restore_link: () => ['No record data affected'],
+  archive_link: (i) => i.records_affected
+    ? [`${n(i.values_hidden, 'value')} hidden (kept) across ${n(i.records_affected, 'record')}`]
+    : ['No record data affected'],
+  restore_link: (i) => i.records_affected
+    ? [`${n(i.values_restored, 'value')} shown again across ${n(i.records_affected, 'record')}`]
+    : ['No record data affected'],
 };
 
 function labelResolver(operations) {

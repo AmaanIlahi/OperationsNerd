@@ -10,8 +10,8 @@ One failure in it matters and is recorded here.
   `add_link` operations. **12 of 15 operations were refused** by the validator
   ("Entity type 'ref:owner' does not exist"), so the three entity types came
   out with no fields. T02-T04 then failed as a cascade.
-- **No retry happened.** The agent turn retries once only when *every*
-  operation is refused. Here the three `create_entity_type` operations were
+- **No retry happened (at that time).** The agent turn then retried once only
+  when *every* operation was refused. Here the three `create_entity_type` operations were
   valid, so the proposal counted as partly valid and was shown to the owner
   as is.
 - **Classification: implementation bug** (owner review). The request is
@@ -24,7 +24,17 @@ One failure in it matters and is recorded here.
 - **Not reproduced:** the next 12 groomer and bakery T01 runs (6 per full run,
   two full runs) passed with zero refused operations. A pass rate from 3 runs
   per task is a small sample; see the pass^k column.
-- **Not fixed.** Agent, validator and app behaviour are unchanged on purpose.
+- **Fixed in `f39d65c`** ("Retry on any refused operation, add prompt example,
+  reclassify partial refusals"): any refused operation now triggers one retry
+  with the reasons and the exact expected shape, and the system prompt has a
+  correct two-entity example. The retry logic is unit-tested (a `ref:`-style
+  proposal is corrected on retry and the correct one is applied).
+- **Current state: run `20261017-064905`** (commit `f39d65c`, 90/90, pass^k
+  100%). The retry **did not fire** in that run: no operation was refused
+  anywhere, so the fix is **not confirmed live yet**. Before the fix it
+  failed once in the smoke run and once in the 18 empty-business T01 runs of the
+  three earlier full runs, so a clean run of 6 such T01s is weak evidence. It is confirmed only once a live run shows a
+  refusal being retried and repaired.
 
 
 ### 20261017-021801 - 81/90: the groomer T01 `ref:owner` failure happened again

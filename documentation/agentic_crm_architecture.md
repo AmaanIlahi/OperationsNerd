@@ -202,5 +202,10 @@ Each run several times per system, recording success, turns, corrections, time, 
 - **Modules own workflow rules** (for example receiving, shipping, stock). They are written once per module, never per company.
   An owner configures the shape; the module supplies the behaviour.
 - **Shared core data** (parties, items, accounting) is planned, **not built**. Modules would reference it instead of each keeping a copy.
-- **Open decision, isolation:** one shared database with `business_id` on every table (today, scoped by account), or one database per company.
-  Decide before the first module touches core data.
+- **Decision, isolation:** one shared database, not one per company. Today it is scoped by account (`business_id` on the business tables);
+  a company ID on every table is part of the planned migration below.
+
+**Decision: links stay app-validated EAV for now.** Links are validated in the API and stored in `entity_attributes`
+(a link value is the target record's id, kept under the link's key). A database-level `record_links` / `link_types` table
+with `required` and `on_delete` rules, plus a company ID on every table, is the planned next migration. It is separate
+from the agentic CRM PR (#14). We are staying on one shared database.

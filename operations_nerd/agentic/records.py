@@ -188,8 +188,18 @@ def _link_views(conn, business_id: int, spec: dict, entity: dict, records: list[
     return out
 
 
+def _begin_write(conn):
+    """Takes SQLite's write lock before any check is read, so a check (such as
+    "this one_to_one target is free") and the write that depends on it are one
+    atomic step. A second writer waits for the first to commit and then sees
+    its result. Without this, two requests could both pass the check."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+
 def create_record(account_id: int, business_id: int, entity_key: str, values: dict) -> dict:
     with d.get_conn() as conn:
+        _begin_write(conn)
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
         cleaned, errors = _check_values(conn, business_id, spec, entity, values, None)
         if errors:
@@ -202,6 +212,7 @@ def create_record(account_id: int, business_id: int, entity_key: str, values: di
 
 def update_record(account_id: int, business_id: int, entity_key: str, record_id: int, values: dict) -> dict:
     with d.get_conn() as conn:
+        _begin_write(conn)
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
         record = _owned_record(conn, business_id, entity_key, record_id)
         cleaned, errors = _check_values(
