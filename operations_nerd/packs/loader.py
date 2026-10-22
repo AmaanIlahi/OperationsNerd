@@ -120,10 +120,7 @@ def load_pack(pack_id: str, packs_dir: str = None) -> Pack:
         except yaml.YAMLError as e:
             raise PackLoadError(pack_id, [f"Invalid YAML syntax in entity_schemas.yaml: {e}"])
 
-    # Unknown top-level blocks must not vanish. Until now a block like
-    # record_types: in pack.yaml was read and then dropped without a word,
-    # because only the keys below are ever passed to the Pack model. A pack
-    # author would see no error and no types. Report every unknown key.
+    # Pack construction below selects known blocks, so reject extras before that step.
     expected_keys = {
         "pack.yaml": {"id", "version", "display_name"},
         "questionnaire.yaml": {"questions"},

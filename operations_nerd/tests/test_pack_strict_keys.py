@@ -1,22 +1,4 @@
-"""
-Strict pack-loading keys.
-
-Until this change, two kinds of mistakes vanished silently:
-
-1. An unknown top-level block in a pack file (for example record_types:
-   in pack.yaml) was read and then dropped, because only the known keys
-   are ever passed to the Pack model. No error, no warning.
-2. A misspelled or unsupported key inside a known block (a question, an
-   event schema, an entity schema) was dropped by pydantic's default
-   extra='ignore'.
-
-Both hide pack-authoring bugs and, worse, make a genuine break in the
-config-only thesis look like a quiet no-op. The loader's own docstring
-says a loader that silently tolerates bad packs makes that distinction
-meaningless, so the loader now rejects both. These checks build throwaway
-pack folders under the system temp dir; the two shipped packs are checked
-last and must keep loading.
-"""
+"""Reject unsupported pack keys without changing the shipped packs."""
 
 import os
 import shutil
