@@ -11,6 +11,7 @@ import http.client
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -184,16 +185,75 @@ def test_oversized_body_is_refused_through_wsgi():
     assert status == 413
 
 
+class Skip(Exception):
+    pass
+
+
+FORK_CHILD_SECONDS = 5
+
+# Fork; in the child call the WSGI app for GET /healthz and exit 0 only if it
+# answers 200 within FORK_CHILD_SECONDS (SIGALRM ends a hung child). uWSGI does
+# exactly this: import the WSGI file in the master, then fork the worker.
+# Kept as source so the in-process test and the fresh-interpreter test share it.
+FORK_HELPER = f"""
+import os, signal
+from wsgiref.util import setup_testing_defaults
+
+def healthz_in_forked_child(application):
+    pid = os.fork()
+    if pid == 0:
+        code = 1
+        try:
+            signal.alarm({FORK_CHILD_SECONDS})
+            environ = {{"REQUEST_METHOD": "GET", "PATH_INFO": "/healthz", "CONTENT_LENGTH": ""}}
+            setup_testing_defaults(environ)
+            seen = {{}}
+            body = b"".join(application(environ, lambda status, headers, exc=None: seen.setdefault("status", status)))
+            code = 0 if seen.get("status", "").startswith("200") and b"ok" in body else 2
+        finally:
+            os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status)
+"""
+
+
+def test_forked_child_serves_after_the_parent_already_built_the_wrapper():
+    if not hasattr(os, "fork"):
+        raise Skip("os.fork is not available on this platform")
+    assert Client().call("GET", "/healthz")[0] == 200            # the parent builds its wrapper and loop thread
+    namespace = {}
+    exec(FORK_HELPER, namespace)
+    assert namespace["healthz_in_forked_child"](wsgi.application) == 0,         "a forked child must not reuse the parent's dead event-loop thread"
+
+
+def test_forked_child_serves_when_the_wrapper_was_never_used_before_the_fork():
+    if not hasattr(os, "fork"):
+        raise Skip("os.fork is not available on this platform")
+    script = FORK_HELPER + f"""
+import sys
+sys.path.insert(0, {ROOT!r})
+import wsgi                                  # the uWSGI master imports the WSGI file...
+sys.exit(healthz_in_forked_child(wsgi.application))      # ...then forks the worker, before any request
+"""
+    done = subprocess.run([sys.executable, "-c", script], cwd=WORKDIR, capture_output=True, text=True,
+                          timeout=FORK_CHILD_SECONDS * 6)
+    assert done.returncode == 0, f"forked child did not answer /healthz (exit {done.returncode}): {done.stderr[-1500:]}"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
-    failed = 0
+    failed = skipped = 0
     for name, fn in tests:
         try:
             fn()
             print("PASS", name)
+        except Skip as e:
+            skipped += 1
+            print("SKIP", name, "-", e)
         except Exception as e:
             failed += 1
             print("FAIL", name, "-", repr(e))
     _server.shutdown()
-    print(f"\n{len(tests) - failed} tests passed" + (f", {failed} FAILED" if failed else ""))
+    print(f"\n{len(tests) - failed - skipped} tests passed" + (f", {skipped} skipped" if skipped else "")
+          + (f", {failed} FAILED" if failed else ""))
     sys.exit(1 if failed else 0)

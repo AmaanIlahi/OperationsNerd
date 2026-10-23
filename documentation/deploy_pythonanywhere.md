@@ -160,6 +160,14 @@ PA's free-account proxy]`
 
 5. Go back to the Web tab and click the green **Reload `<username>.pythonanywhere.com`** button.
 
+> **Why `wsgi.py` builds the wrapper lazily.** PA's uWSGI imports the WSGI file in a master process and
+> then forks the worker that serves requests. `a2wsgi` starts a background event-loop thread when its
+> wrapper is created, and threads do not survive a fork, so a wrapper created at import time hangs every
+> request with no error. `wsgi.py` therefore creates it on the first request, in the process that serves
+> it (and again if the process id changes). Do not change `application` back to a module-level
+> `ASGIMiddleware(app)`. `tests/test_wsgi_entry.py` covers this on Linux by forking and serving `/healthz`
+> in the child; the two fork tests are skipped on Windows.
+
 ## 6. Check it started
 
 - Open `https://<username>.pythonanywhere.com/healthz`. It should show `{"status":"ok"}`.
