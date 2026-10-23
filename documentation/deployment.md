@@ -1,5 +1,7 @@
 # Deployment (Railway or Render)
 
+Deploying on a free PythonAnywhere account instead (WSGI, no Docker)? See `deploy_pythonanywhere.md`.
+
 One container, one service, one persistent volume. Nothing here has been deployed yet: this
 document was written and checked offline, and **every platform-specific detail is marked
 `[UNVERIFIED]`** where it could not be confirmed without a real account. Check those against the
