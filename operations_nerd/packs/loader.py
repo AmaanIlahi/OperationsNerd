@@ -28,12 +28,14 @@ make that distinction meaningless.
 import os
 import re
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 
 # ---------- structural models ----------
 
 class Question(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     label: str
     type: str                      # text | number | multiselect | boolean | select
@@ -42,12 +44,16 @@ class Question(BaseModel):
 
 
 class EventSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     event_type: str
     extract_fields: list[str]
     valid_action_types: list[str]
 
 
 class EntitySchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     entity_type: str
     label: str
     fields: list[str]
@@ -55,6 +61,8 @@ class EntitySchema(BaseModel):
 
 
 class Pack(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     version: str
     display_name: str
@@ -111,6 +119,27 @@ def load_pack(pack_id: str, packs_dir: str = None) -> Pack:
             entity_schemas = _read_yaml(entity_schemas_path)
         except yaml.YAMLError as e:
             raise PackLoadError(pack_id, [f"Invalid YAML syntax in entity_schemas.yaml: {e}"])
+
+    # Pack construction below selects known blocks, so reject extras before that step.
+    expected_keys = {
+        "pack.yaml": {"id", "version", "display_name"},
+        "questionnaire.yaml": {"questions"},
+        "event_schemas.yaml": {"schemas"},
+        "prompts.yaml": {"templates"},
+        "approval_defaults.yaml": {"defaults"},
+    }
+    unknown_issues = []
+    for fname, expected in expected_keys.items():
+        data = {"pack.yaml": meta, "questionnaire.yaml": questionnaire,
+                "event_schemas.yaml": event_schemas, "prompts.yaml": prompts,
+                "approval_defaults.yaml": approval_defaults}[fname]
+        for key in sorted(set(data) - expected):
+            unknown_issues.append(f"{fname}: unknown top-level key '{key}'")
+    if os.path.isfile(entity_schemas_path):
+        for key in sorted(set(entity_schemas) - {"entities"}):
+            unknown_issues.append(f"entity_schemas.yaml: unknown top-level key '{key}'")
+    if unknown_issues:
+        raise PackLoadError(pack_id, unknown_issues)
 
     try:
         pack = Pack(
