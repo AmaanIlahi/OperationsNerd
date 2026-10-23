@@ -2,7 +2,7 @@
 Checks that the stock tests aren't vacuous: removes each protection in turn
 from a temp copy of modules/logistics/, runs every test against it, and reports
 which tests fail. Nothing in the real folder is changed. Run from the repo
-root with the venv (takes about a minute):
+root with the venv (takes a few minutes):
 
     python -B modules/logistics/tests/mutation_check.py
 
@@ -27,41 +27,55 @@ S, A = "schema.sql", "stock.py"
 WRONG_REASON = "rejected for the wrong reason"
 
 # Implied by the other rules today; kept for the clearer error message (see README).
-EXPECTED_REDUNDANT = {"on hand not negative trigger", "reservation quantity > 0 CHECK"}
+EXPECTED_REDUNDANT = {"on hand not negative trigger", "reservation quantity > 0 CHECK", "lot on hand not negative trigger"}
 
 HARNESS = r'''
 import sys
 sys.path.insert(0, sys.argv[1] + "/tests")
-import test_stock as t
-for name, fn in [(n, f) for n, f in vars(t).items() if n.startswith("test_") and callable(f)]:
-    try:
-        fn()
-    except BaseException as e:
-        print("FAIL", name, "|", type(e).__name__, (str(e).splitlines() or [""])[0][:120])
+import test_stock, test_lots
+for t in (test_stock, test_lots):
+    for name, fn in [(n, f) for n, f in vars(t).items() if n.startswith("test_") and callable(f)]:
+        try:
+            fn()
+        except BaseException as e:
+            print("FAIL", name, "|", type(e).__name__, (str(e).splitlines() or [""])[0][:120])
 '''
 
 NO_TRANSACTION = [('    conn.execute("BEGIN IMMEDIATE")\n', ""), ('conn.execute("COMMIT")', "pass")]
 NO_RAISE = "BEGIN SELECT 1; END;"
+WITHIN_LOT = "BEGIN SELECT RAISE(ABORT, 'allocation exceeds the free stock of its lot'); END;"
+# Reads the lots outside the write lock and takes it again to write, so two reserves can read the same free stock.
+SPLIT_LOT_RESERVE = [("    plan, left = [], quantity\n", '    conn.execute("COMMIT")\n    plan, left = [], quantity\n'),
+                     ("    reserved_now = quantity - left\n", '    conn.execute("BEGIN IMMEDIATE")\n    reserved_now = quantity - left\n')]
+
+
+def immutable(table, verb):
+    """Disables one of a table's no-update / no-delete triggers, which share a message."""
+    head = f"BEFORE {verb} ON {table}\nBEGIN SELECT RAISE(ABORT, '{table} rows are immutable'); END;"
+    return S, [(head, f"BEFORE {verb} ON {table} WHEN 0\n" + NO_RAISE)]
 
 # (label, file, [(old, new), ...], [file, [(old, new), ...]] ...). Each old string must occur exactly once.
 MUTATIONS = [
     ("UNIQUE key on stock_commands", S, [("    UNIQUE (business_id, idempotency_key)\n);", "    id2 INTEGER\n);")]),
-    ("UNIQUE key on stock_movements", S, [("    UNIQUE (business_id, idempotency_key),\n    FOREIGN KEY", "    FOREIGN KEY")]),
+    ("UNIQUE key on stock_movements", S, [("    UNIQUE (business_id, idempotency_key),\n    FOREIGN KEY (business_id, reservation_id)",
+                                           "    FOREIGN KEY (business_id, reservation_id)")]),
     ("UNIQUE key on stock_reservations", S, [("    UNIQUE (business_id, idempotency_key),\n    UNIQUE (business_id, id)",
                                               "    UNIQUE (business_id, id)")]),
-    ("UNIQUE (business_id, id) on stock_reservations", S, [("    UNIQUE (business_id, id),  ", "  ")]),
+    ("UNIQUE (business_id, id) on stock_reservations", S, [("    UNIQUE (business_id, id),                -- the parent key for stock_movements'",
+                                                            "                -- the parent key for stock_movements'")]),
     ("non-empty key CHECK on stock_commands", S, [("idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),\n    command",
                                                    "idempotency_key TEXT    NOT NULL,\n    command")]),
-    ("non-empty key CHECK on stock_movements", S, [("idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),\n    created_at",
-                                                    "idempotency_key TEXT    NOT NULL,\n    created_at")]),
+    ("non-empty key CHECK on stock_movements", S, [("CHECK (source_ref <> ''),\n    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),",
+                                                    "CHECK (source_ref <> ''),\n    idempotency_key TEXT    NOT NULL,")]),
     ("non-empty key CHECK on stock_reservations", S, [("idempotency_key  TEXT    NOT NULL CHECK (idempotency_key <> ''),",
                                                        "idempotency_key  TEXT    NOT NULL,")]),
-    ("command name CHECK", S, [(" CHECK (command IN ('receive', 'reserve', 'release', 'ship'))", "")]),
+    ("command name CHECK", S, [("CHECK (command IN (", "CHECK (1 OR command IN (")]),
     ("non-empty source_ref CHECK", S, [(" CHECK (source_ref <> '')", "")]),
     ("non-empty order_ref CHECK", S, [(" CHECK (order_ref <> '')", "")]),
     ("movement sign/type CHECK", S, [(",\n    CHECK ((movement_type = 'receipt' AND quantity > 0) OR (movement_type = 'shipment' AND quantity < 0))", "")]),
     ("shipment has a reservation, receipt has none CHECK", S, [(",\n    CHECK ((movement_type = 'shipment') = (reservation_id IS NOT NULL))", "")]),
-    ("business-scoped FOREIGN KEY to the reservation", S, [(",\n    FOREIGN KEY (business_id, reservation_id) REFERENCES stock_reservations (business_id, id)", "")]),
+    ("business-scoped FOREIGN KEY to the reservation", S,
+     [("    FOREIGN KEY (business_id, reservation_id) REFERENCES stock_reservations (business_id, id),\n", "")]),
     ("stock_movements no UPDATE trigger", S, [("BEFORE UPDATE ON stock_movements\nBEGIN SELECT RAISE(ABORT, 'stock_movements rows are immutable'); END;",
                                                "BEFORE UPDATE ON stock_movements WHEN 0\n" + NO_RAISE)]),
     ("stock_movements no DELETE trigger", S, [("BEFORE DELETE ON stock_movements\nBEGIN SELECT RAISE(ABORT, 'stock_movements rows are immutable'); END;",
@@ -108,6 +122,91 @@ MUTATIONS = [
                                          "WHERE ? > 0 AND item_id = ? AND status = 'active')\"\"\"")]),
     ("positive integer validation", A, [("def _positive_int(name, value):\n", "def _positive_int(name, value):\n    return\n")]),
     ("non-empty text validation", A, [("def _text(name, value):\n", "def _text(name, value):\n    return\n")]),
+
+    # ------------------------------------------------ v2: lots and expiry, database
+    ("lot tracking PRIMARY KEY", S, [("    PRIMARY KEY (business_id, item_id)\n", "    x INTEGER\n")]),
+    ("lot tracking only before any stock trigger", S, [("BEGIN SELECT RAISE(ABORT, 'item already has stock without lots'); END;", NO_RAISE)]),
+    ("stock_lot_tracking no UPDATE trigger", *immutable("stock_lot_tracking", "UPDATE")),
+    ("stock_lot_tracking no DELETE trigger", *immutable("stock_lot_tracking", "DELETE")),
+    ("lot number UNIQUE per business and item", S, [("    UNIQUE (business_id, item_id, lot_number),\n", "")]),
+    ("UNIQUE (business_id, id) on stock_lots", S, [("    UNIQUE (business_id, id),                -- the parent key for stock_lot_holds\n", "")]),
+    ("UNIQUE (business_id, item_id, id) on stock_lots", S, [("    UNIQUE (business_id, item_id, id),       -- the parent key for movements",
+                                                             "    -- the parent key for movements")]),
+    ("lots only for tracked items FOREIGN KEY", S,
+     [("    FOREIGN KEY (business_id, item_id) REFERENCES stock_lot_tracking (business_id, item_id)\n", "    CHECK (1)\n")]),
+    ("non-empty lot_number CHECK", S, [(" CHECK (lot_number <> '')", "")]),
+    ("expiry_date is a date CHECK", S, [(" CHECK (expiry_date IS date(expiry_date))", "")]),
+    ("stock_lots no UPDATE trigger", *immutable("stock_lots", "UPDATE")),
+    ("stock_lots no DELETE trigger", *immutable("stock_lots", "DELETE")),
+    ("hold event values CHECK", S, [(" CHECK (event IN ('hold', 'release'))", "")]),
+    ("non-empty hold reason CHECK", S, [(" CHECK (reason <> '')", "")]),
+    ("non-empty key CHECK on stock_lot_holds", S, [("CHECK (reason <> ''),\n    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),",
+                                                    "CHECK (reason <> ''),\n    idempotency_key TEXT    NOT NULL,")]),
+    ("UNIQUE key on stock_lot_holds", S, [("    UNIQUE (business_id, idempotency_key),\n    FOREIGN KEY (business_id, lot_id)",
+                                           "    FOREIGN KEY (business_id, lot_id)")]),
+    ("hold's business-scoped FOREIGN KEY to its lot", S, [(",\n    FOREIGN KEY (business_id, lot_id) REFERENCES stock_lots (business_id, id)", "")]),
+    ("holds alternate trigger", S, [("BEGIN SELECT RAISE(ABORT, 'a lot is held and released in turn'); END;", NO_RAISE)]),
+    ("stock_lot_holds no UPDATE trigger", *immutable("stock_lot_holds", "UPDATE")),
+    ("stock_lot_holds no DELETE trigger", *immutable("stock_lot_holds", "DELETE")),
+    ("allocation quantity > 0 CHECK", S, [("quantity       INTEGER NOT NULL CHECK (quantity > 0),", "quantity       INTEGER NOT NULL,")]),
+    ("allocation as_of is a date CHECK", S, [("as_of          TEXT    NOT NULL CHECK (as_of IS date(as_of)),", "as_of          TEXT    NOT NULL,")]),
+    ("one allocation per reservation and lot UNIQUE", S, [("    UNIQUE (business_id, reservation_id, lot_id),", "    ")]),
+    ("allocation FOREIGN KEY to its reservation", S,
+     [("    FOREIGN KEY (business_id, reservation_id) REFERENCES stock_reservations (business_id, id) DEFERRABLE INITIALLY DEFERRED,\n", "")]),
+    ("that FOREIGN KEY made immediate instead of deferred", S, [(" DEFERRABLE INITIALLY DEFERRED", "")]),
+    ("allocation FOREIGN KEY to its lot and item", S,
+     [(",\n    FOREIGN KEY (business_id, item_id, lot_id) REFERENCES stock_lots (business_id, item_id, id)\n);", "\n);")]),
+    ("pending allocations count against the lot (in the view)", S, [("(r.id IS NULL OR r.status = 'active')", "r.status = 'active'")]),
+    ("allocations before their reservation trigger", S,
+     [("BEGIN SELECT RAISE(ABORT, 'allocations are written before their reservation'); END;", NO_RAISE)]),
+    ("no allocation from a held lot trigger", S, [("BEGIN SELECT RAISE(ABORT, 'cannot allocate from a held lot'); END;", NO_RAISE)]),
+    ("no allocation from an expired lot trigger", S, [("BEGIN SELECT RAISE(ABORT, 'cannot allocate from an expired lot'); END;", NO_RAISE)]),
+    ("allocation within the lot's free stock trigger", S, [(WITHIN_LOT, NO_RAISE)]),
+    ("stock_allocations no UPDATE trigger", *immutable("stock_allocations", "UPDATE")),
+    ("stock_allocations no DELETE trigger", *immutable("stock_allocations", "DELETE")),
+    ("allocations match the reservation trigger", S,
+     [("BEGIN SELECT RAISE(ABORT, 'allocations must match the reservation''s item and quantity'); END;", NO_RAISE)]),
+    ("the item part of that trigger", S, [("\n  OR EXISTS (SELECT 1 FROM stock_allocations\n"
+                                           "              WHERE business_id = NEW.business_id AND reservation_id = NEW.id AND item_id <> NEW.item_id)", "")]),
+    ("movement FOREIGN KEY to its lot and item", S,
+     [("    FOREIGN KEY (business_id, item_id, lot_id) REFERENCES stock_lots (business_id, item_id, id),\n", "")]),
+    ("lot shipment FOREIGN KEY to its allocation", S,
+     [("    FOREIGN KEY (business_id, reservation_id, lot_id) REFERENCES stock_allocations (business_id, reservation_id, lot_id),\n", "")]),
+    ("lot shipment carries as_of CHECK", S, [(",\n    CHECK (movement_type <> 'shipment' OR lot_id IS NULL OR as_of IS NOT NULL)", "")]),
+    ("movement as_of is a date CHECK", S, [("as_of           TEXT    CHECK (as_of IS date(as_of)),", "as_of           TEXT,")]),
+    ("movements of a tracked item need a lot trigger", S, [("BEGIN SELECT RAISE(ABORT, 'movements of a lot-tracked item need a lot'); END;", NO_RAISE)]),
+    ("shipment within its allocation trigger", S, [("BEGIN SELECT RAISE(ABORT, 'shipment exceeds its allocation'); END;", NO_RAISE)]),
+    ("no shipment from a held lot trigger", S, [("BEGIN SELECT RAISE(ABORT, 'cannot ship from a held lot'); END;", NO_RAISE)]),
+    ("no shipment from an expired lot trigger", S, [("BEGIN SELECT RAISE(ABORT, 'cannot ship from an expired lot'); END;", NO_RAISE)]),
+    ("lot on hand not negative trigger", S, [("BEGIN SELECT RAISE(ABORT, 'lot on hand would go negative'); END;", NO_RAISE)]),
+    # ------------------------------------------------ v2: lots and expiry, app
+    ("track_lots refuses an item with stock", A, [('raise InvalidState(f"item {item_id} already has stock without lots")', "pass")]),
+    ("track_lots on a tracked item changes nothing", A, [("        if not _lot_tracked(conn, business_id, item_id):\n            if conn.execute",
+                                                         "        if True:\n            if conn.execute")]),
+    ("receive: a tracked item needs a lot", A, [("if tracked and lot_number is None:", "if False:")]),
+    ("receive: an item without lots takes none", A, [("if not tracked and lot_number is not None:", "if False:")]),
+    ("receive: expiry must match the lot's", A, [('if lot["expiry_date"] != expiry_date:', "if False:")]),
+    ("reserve takes the lot path for tracked items", A, [("        if _lot_tracked(conn, business_id, item_id):\n            return _reserve_lots",
+                                                         "        if False:\n            return _reserve_lots")]),
+    ("earliest expiry first", A, [("ORDER BY expiry_date IS NULL, expiry_date, lot_id", "ORDER BY lot_id")]),
+    ("lots without expiry last", A, [("ORDER BY expiry_date IS NULL, expiry_date, lot_id", "ORDER BY expiry_date, lot_id")]),
+    ("reserve passes over held lots", A, [('lot["usable"] = not lot["on_hold"] and not lot["expired"]', 'lot["usable"] = not lot["expired"]')]),
+    ("reserve passes over expired lots", A, [('not lot["on_hold"] and not lot["expired"] and', 'not lot["on_hold"] and')]),
+    ("a lot is usable on its expiry date", A, [("return expiry_date is not None and as_of > expiry_date",
+                                                "return expiry_date is not None and as_of >= expiry_date")]),
+    ("reserve needs as_of for a tracked item", A, [('raise ValueError(f"item {item_id} is lot-tracked: reserve needs as_of")', "pass")]),
+    ("ship takes the lot path for tracked items", A, [('if _lot_tracked(conn, business_id, r["item_id"]):', "if False:")]),
+    ("ship passes over held and expired lots", A, [('if a["on_hold"] or _expired(a["expiry_date"], as_of):', "if False:")]),
+    ("ship rejects what usable allocations can't cover", A, [("    if need:\n        raise LotUnavailable", "    if False:\n        raise LotUnavailable")]),
+    ("ship needs as_of for a tracked item", A, [("raise ValueError(f\"item {r['item_id']} is lot-tracked: ship needs as_of\")", "pass")]),
+    ("hold state check", A, [('if lot["on_hold"] == (event == "hold"):', "if False:")]),
+    ("business filter on lot lookup", A, [('FROM stock_lot_levels WHERE lot_id = ? AND business_id = ?"',
+                                           'FROM stock_lot_levels WHERE lot_id = ? AND ? > 0"')]),
+    ("business filter on lots()", A, [("FROM stock_lot_levels WHERE business_id = ? AND item_id = ?",
+                                       "FROM stock_lot_levels WHERE ? > 0 AND item_id = ?")]),
+    ("date validation", A, [("def _date(name, value):\n", "def _date(name, value):\n    return\n")]),
+    ("lots read outside the write lock", A, SPLIT_LOT_RESERVE),
+    ("lots read outside the write lock AND no within-lot trigger", A, SPLIT_LOT_RESERVE, S, [(WITHIN_LOT, NO_RAISE)]),
 ]
 
 
