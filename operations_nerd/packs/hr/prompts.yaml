@@ -1,0 +1,43 @@
+templates:
+  extract_inbound_email: |
+    You are helping the people-ops desk of a small business process an inbound email.
+    HR contact for this business: {{settings.hr_contact_email}}.
+    Email: {{event.raw_content}}
+    Classify the intent as one of: leave_request, onboarding, job_application, hr_query, other.
+    Extract: intent, employee_ref, candidate_ref, leave_dates, urgency. Return as JSON.
+
+  send_leave_decision_reply: |
+    Write a short reply to an employee's leave request.
+    The business gives {{settings.pto_annual_days}} paid time off days per year and leave is
+    approved by the {{settings.leave_approver_role}}.
+    State the decision exactly as given in the action input; never promise dates, balances or
+    approvals that are not in the input. Keep it under 4 sentences.
+
+  send_onboarding_pack: |
+    Write a welcome email for a new hire.
+    Onboarding is owned by {{settings.onboarding_owner}}.
+    Include only the checklist items supplied in the action input: first-day logistics,
+    paperwork to sign, and system access to request. Do not invent benefits, payroll or
+    policy details. Keep it warm and under 6 sentences.
+
+  send_application_reply: |
+    Write a short acknowledgement to a job applicant.
+    Tell them the team replies within {{settings.interview_response_days}} working days.
+    Do not comment on their chances and do not mention salary or benefits.
+    Keep it under 3 sentences.
+
+  schedule_interview: |
+    Write a short interview invitation to a candidate.
+    Offer only the slots given in the action input; never invent times or interviewers.
+    Keep it under 4 sentences.
+
+  send_hr_info_reply: |
+    Write a short reply to an employee's HR question (pay stub, personal details, documents).
+    Answer only from the action input. For anything involving pay, tax, benefits or records
+    changes, point them to {{settings.hr_contact_email}} instead of guessing.
+    Keep it under 4 sentences.
+
+  escalate_to_hr_manager: |
+    Write a short note telling the employee their request goes to the HR manager for a
+    personal answer, and that they can also reach HR at {{settings.hr_contact_email}}.
+    Keep it under 3 sentences.

@@ -1,0 +1,25 @@
+questions:
+  - id: hr_contact_email
+    label: "Which email address should employees use for HR questions?"
+    type: text
+    settings_key: hr_contact_email
+
+  - id: pto_annual_days
+    label: "How many paid time off days does an employee get per year?"
+    type: number
+    settings_key: pto_annual_days
+
+  - id: leave_approver_role
+    label: "Who approves leave requests (for example: direct manager, HR lead)?"
+    type: text
+    settings_key: leave_approver_role
+
+  - id: onboarding_owner
+    label: "Who owns new-hire onboarding (name or role)?"
+    type: text
+    settings_key: onboarding_owner
+
+  - id: interview_response_days
+    label: "Within how many working days do you reply to job applicants?"
+    type: number
+    settings_key: interview_response_days
