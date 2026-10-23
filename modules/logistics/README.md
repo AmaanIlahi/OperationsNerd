@@ -1,12 +1,17 @@
-# LogisticsNerd stock engine (v2: lots and expiry)
+# LogisticsNerd stock engine (v3: opening stock and shipment records)
 
-LogisticsNerd's stock engine: receive stock, reserve it for orders, ship it and release what isn't needed. v2 adds optional lots with expiry dates, holds and recall. It is standalone Python 3.11 with stdlib `sqlite3` only. It imports nothing from `operations_nerd/` and makes no LLM calls.
+LogisticsNerd's stock engine: receive stock, reserve it for orders, ship it and release what isn't needed.
+- v2 adds optional lots with expiry dates, holds and recall.
+- v3 adds opening stock, receive-and-reserve in one transaction, and shipments as records: lines, a single dispatch and tracking events.
+
+It is standalone Python 3.11 with stdlib `sqlite3` only. It imports nothing from `operations_nerd/` and makes no LLM calls.
 
 Files:
 - [stock.py](stock.py): the commands and queries
 - [schema.sql](schema.sql): the tables, constraints and triggers
-- [tests/test_stock.py](tests/test_stock.py): the v1 tests, unchanged in v2
-- [tests/test_lots.py](tests/test_lots.py): the lot tests
+- [tests/test_stock.py](tests/test_stock.py): the v1 tests, unchanged since v1
+- [tests/test_lots.py](tests/test_lots.py): the lot tests, unchanged since v2
+- [tests/test_shipments.py](tests/test_shipments.py): the v3 tests
 - [tests/mutation_check.py](tests/mutation_check.py): checks that the tests catch the removal of each protection
 
 ## Design rules
@@ -36,6 +41,12 @@ Each command runs in one `BEGIN IMMEDIATE` transaction. `conn` comes from `stock
 | `reserve(conn, business_id, item_id, quantity, order_ref, idempotency_key, as_of=None)` | Reserves up to what's available. If nothing is available, it writes no reservation and `reservation_id` is `None`. A lot-tracked item needs `as_of` and gets allocations, see [Lots and expiry](#lots-and-expiry). | `reservation_id`, `item_id`, `requested`, `reserved`, `shortage`; for a lot-tracked item, also `allocations` |
 | `release(conn, business_id, reservation_id, idempotency_key)` | Frees the unshipped remainder of an active reservation and marks it `released`. What already shipped stays shipped. For a lot-tracked item this frees what is left of each allocation. | `reservation_id`, `released`, `status` |
 | `ship(conn, business_id, reservation_id, quantity, idempotency_key, as_of=None)` | Ships part or all of an active reservation. It writes one negative `shipment` movement with `reservation_id` set. In the same statement, a database trigger raises the reservation's `quantity_shipped` and marks it `fulfilled` once everything has shipped. A lot-tracked item needs `as_of` and ships lot by lot: one movement per lot. | `reservation_id`, `shipped`, `quantity_shipped`, `remaining`, `status`, and `movement_id`; for a lot-tracked item, `lots` instead of `movement_id` |
+| `open_stock(conn, business_id, item_id, quantity, source_ref, idempotency_key, lot_number=None, expiry_date=None)` | Records stock that was there before the system: an `opening` movement, not a supplier receipt. Only before any receipt or shipment of the item. Lots work as in `receive`. | Same as `receive` |
+| `receive_and_reserve(conn, business_id, item_id, quantity, source_ref, order_ref, idempotency_key, lot_number=None, expiry_date=None, as_of=None, reserve_quantity=None)` | Receives stock and reserves it for a waiting order line, in one transaction. `source_ref` is the purchase reference. `reserve_quantity` (default: all of it) is how much goes to the line. For a lot-tracked item it needs `as_of` and allocates from the lot just received. | What `receive` returns, plus `reservation_id`, `order_ref`, `reserved` |
+| `create_shipment(conn, business_id, shipment_number, idempotency_key)` | Starts a draft shipment. The number is unique per business. | `shipment_id`, `shipment_number`, `status` |
+| `add_shipment_line(conn, business_id, shipment_id, reservation_id, quantity, idempotency_key)` | Puts part or all of an active reservation on a draft shipment. Nothing moves yet. | `line_id`, `shipment_id`, `reservation_id`, `quantity` |
+| `dispatch(conn, business_id, shipment_id, carrier, idempotency_key, as_of, label_ref=None, tracking_ref=None)` | Dispatches a draft shipment, once. Needs a carrier and a label or tracking reference. It writes every line's shipment movements and the dispatch record in one transaction. | The shipment, as `shipment()` returns it |
+| `record_tracking_event(conn, business_id, shipment_id, event, occurred_at, idempotency_key, detail=None)` | Appends a carrier event to a dispatched shipment. Never changes stock. | `event_id`, `shipment_id`, `event`, `status` |
 | `track_lots(conn, business_id, item_id, idempotency_key)` | Turns on lot tracking for an item. Only before the item has any stock. It can't be turned off. On an item that is already tracked it changes nothing. | `item_id`, `lot_tracked` |
 | `hold_lot(conn, business_id, lot_id, reason, idempotency_key)` | Puts a lot on hold: no new allocations, no shipping from it. | `lot_id`, `lot_number`, `on_hold`, `allocated` (what existing allocations still hold in the lot) |
 | `release_hold(conn, business_id, lot_id, reason, idempotency_key)` | Takes a lot off hold. | Same as `hold_lot` |
@@ -45,16 +56,22 @@ Each command runs in one `BEGIN IMMEDIATE` transaction. `conn` comes from `stock
 Queries:
 - `on_hand`, `reserved` and `available`, per business and item. `available` reads both sides in one statement. For a lot-tracked item it includes held and expired lots; `lots` says what can be used.
 - `lots(conn, business_id, item_id, as_of=None)`: the item's lots, earliest expiry first. Each has `on_hand`, `allocated` (reserved, not yet shipped), `free` and `on_hold`. With `as_of`, each also has `expired` and `usable`.
-- `recall(conn, business_id, lot_id)`: the lot's details, `received` and `on_hand`, and every reservation it was allocated to. Each reservation has `reservation_id`, `order_ref`, `status`, `allocated` (from this lot) and `shipped` (from this lot). Released and fulfilled reservations are included.
+- `shipment(conn, business_id, shipment_id)`: the shipment's number, its status (`draft`, `dispatched` or `delivered`), the carrier, label and tracking references and the dispatch date. Also each line with its `order_ref` and the movements it created (with lot, for lot-tracked items), and the tracking events in the order they were recorded.
+- `recall(conn, business_id, lot_id)`: the lot's details, `received` (opening stock included) and `on_hand`, and every reservation it was allocated to. Each reservation has `reservation_id`, `order_ref`, `status`, `allocated` (from this lot) and `shipped` (from this lot). Released and fulfilled reservations are included.
 
 Errors:
 - `ValueError`: bad input, raised before anything is written. This includes a missing `as_of` for a lot-tracked item.
 - `IdempotencyConflict`: a key reused with a different payload.
 - `NotFound`: the reservation or lot isn't in this business.
-- `InvalidState`: the reservation is no longer active, the lot is already on hold (or not on hold, for `release_hold`), or `track_lots` came after the item had stock.
-- `OverShipment`: the shipment is more than is left to ship.
+- `InvalidState`:
+  - The reservation is no longer active.
+  - The lot is already on hold, or not on hold for `release_hold`.
+  - `track_lots` or `open_stock` came after the item had stock or receipts.
+  - The shipment isn't a draft (for a line or a dispatch), isn't dispatched (for a tracking event), or has no lines.
+  - The shipment number is taken, or the reservation is already on that shipment.
+- `OverShipment`: the shipment, line or dispatch is more than is left to ship.
 - `LotMismatch`: a lot was given for an item without lots, none was given for a lot-tracked item, or the expiry date differs from the lot's.
-- `LotUnavailable`: the shipment needs stock from allocated lots that are held or expired on `as_of`.
+- `LotUnavailable`: the shipment or dispatch needs stock from allocated lots that are held or expired on `as_of`, or `receive_and_reserve` received into a lot that is held or expired.
 
 ### Idempotency
 
@@ -96,6 +113,37 @@ Lot tracking is opt-in per item. Items that aren't tracked take the v1 code path
   The caller decides what to do. `hold_lot` returns `allocated`: what existing allocations still hold in the lot. If the hold is permanent, `release` those reservations and `reserve` again, and the new allocations come from other lots. Meanwhile `ship` passes over the held lot and ships the rest of each order from its other allocations.
 - **Recall.** `recall(lot_id)` lists every reservation the lot was allocated to, with `order_ref`, status and the quantity allocated and shipped from that lot. A split order line shows up in the recall of each of its lots.
 
+## Opening stock, receive-and-reserve and shipments (v3)
+
+- **Opening stock** is its own movement kind, `opening`, so a stock count at go-live is never mistaken for a supplier receipt.
+  - It counts in on hand like a receipt.
+  - It must come before any receipt or shipment of the item. Several opening movements are fine, for example one per lot or per shelf.
+  - `source_ref` says where the figure came from, such as a count sheet.
+  - A lot-tracked item calls `track_lots` first, then opens stock into lots.
+- **Receive and reserve** writes the receipt and the reservation in one transaction, under one idempotency key. The purchasing side never coordinates two calls: either both are written or neither is.
+  - For a lot-tracked item the reservation is allocated from the lot just received, not earliest expiry first. These are the goods bought for that order.
+  - If that lot is held, or expired on `as_of`, it raises `LotUnavailable` and writes nothing, the receipt included.
+- **Shipments** are records. A shipment is a number, its lines (reservation, quantity) and, once, a dispatch.
+  - One shipment can carry several reservations. One reservation can ship across several shipments, but appears on each at most once.
+  - `add_shipment_line` won't put more of a reservation on draft shipments than is left to ship.
+  - **`dispatch` happens exactly once and needs a carrier and a label or tracking reference.**
+    - It writes each line's movements as `ship` does: one movement for an item without lots, or one per lot by the lot rules. Then it writes the dispatch row, all in one transaction.
+    - If any line can't ship, nothing is written and the shipment stays a draft.
+    - Movement keys are `<key>/line:<line_id>` and, for lots, `<key>/line:<line_id>/lot:<lot_id>`. The movement's `source_ref` is `shipment:<number>`.
+  - **Status is derived, not stored.**
+    - A shipment is `delivered` once a `delivered` event exists, `dispatched` once its dispatch row exists, and `draft` otherwise.
+    - Events are only ever appended, so a late event, whatever its `occurred_at`, can't move a delivered shipment back.
+    - A stored status would have needed four triggers to keep it in step. Deriving it needs none, and it can't drift.
+  - **Tracking events** take one of `in_transit`, `out_for_delivery`, `delivery_failed`, `delivered` or `exception`, with the carrier's UTC time (`YYYY-MM-DDTHH:MM:SSZ`) and optional detail. They are only accepted for a dispatched shipment. Nothing they write touches stock.
+
+### How `ship` relates to `dispatch`
+
+Both ship from a reservation through the same code and the same database rules: the same movements, the same `quantity_shipped` trigger, and the same lot rules.
+- **`ship`** ships now and keeps no record beyond the movement. Its `source_ref` is `reservation:<id>`. Use it where no carrier is involved, such as a counter pickup or an internal transfer out, or for callers that don't track shipments yet.
+- **`dispatch`** ships a planned shipment. Its movements carry `shipment_id` and `shipment_line_id`, so each line knows the movements it created.
+
+They can be mixed on one reservation. Whatever `ship` takes is no longer available to a planned line. If a draft line then asks for more than is left, `dispatch` raises `OverShipment` and writes nothing. `ship` stays so that existing callers keep working. New code that sends goods with a carrier should use `dispatch`.
+
 ## Tables
 
 | Table | Rows | Notes |
@@ -109,9 +157,18 @@ Lot tracking is opt-in per item. Items that aren't tracked take the v1 code path
 | `stock_allocations` | One per lot per reservation of a tracked item | Quantity and the `as_of` date it was checked against. Written in the same transaction as its reservation, and before it. Immutable. |
 | `stock_lot_levels` (view) | One per lot | `on_hand`, `allocated` (unshipped, on active reservations) and `on_hold`. `stock.py` and the triggers read the same view, so they share one definition. |
 
+| `stock_shipments` | One per shipment | Number, unique per business. Immutable. |
+| `stock_shipment_lines` | One per reservation per shipment | Quantity. Added only while the shipment is a draft. Immutable. |
+| `stock_shipment_dispatches` | One per dispatched shipment | Carrier, label and tracking references, dispatch date. Its primary key makes dispatch happen once. Immutable. |
+| `stock_shipment_events` | One per tracking event | Event, carrier time, detail. Only for a dispatched shipment. Immutable. |
+| `stock_shipment_status` (view) | One per shipment | The derived status, with the dispatch details. |
+
 `stock_movements` gained two columns in v2:
 - `lot_id`: set exactly when the item is lot-tracked.
 - `as_of`: the business date a lot shipment was checked against.
+
+It gained two more in v3, plus the `opening` movement type:
+- `shipment_id` and `shipment_line_id`: set together, only on a shipment movement written by `dispatch`. `as_of` is then the dispatch date.
 
 How a shipment is tied to its reservation:
 - **Foreign key:** `(business_id, reservation_id)` references `stock_reservations (business_id, id)`, so the reservation must exist in the same business.
@@ -177,6 +234,26 @@ Two concurrent `reserve`s for the last units of a lot work the same way as in v1
 
 The database has no business clock. The expiry triggers trust the `as_of` written on the row. They guarantee that the stated date and the lot agree, not that the stated date is today.
 
+### Opening stock and shipment invariants (v3)
+
+| Invariant | Database | App (`stock.py`) |
+|---|---|---|
+| Opening stock is positive, has no reservation, and comes before any other movement of the item | Sign `CHECK`; reservation `CHECK`; `BEFORE INSERT` trigger | `InvalidState` |
+| Receive-and-reserve is all or nothing | — (one transaction) | One `BEGIN IMMEDIATE` transaction; `LotUnavailable` before anything is kept |
+| Shipment numbers are unique per business and not blank | `UNIQUE`, `CHECK` | `InvalidState` |
+| A line belongs to a shipment and a reservation of the same business; a reservation is on a shipment at most once; quantity is positive | Composite FKs, `UNIQUE`, `CHECK` | `NotFound`, `InvalidState`, `ValueError` |
+| Lines are added only before dispatch | `BEFORE INSERT` trigger | `InvalidState` |
+| A line asks no more than is left to ship, counting other draft lines | — (checked again at dispatch, see the next row) | `OverShipment` |
+| **Dispatch happens exactly once** | `PRIMARY KEY (business_id, shipment_id)` on dispatches. Shipment movements can't be written once the dispatch row exists (trigger). | `InvalidState`, inside `BEGIN IMMEDIATE` |
+| **Dispatch creates the movements in the same transaction** | Dispatch's `BEFORE INSERT` trigger: the shipment has lines, and every line's movements add up to its quantity. Shipment movements have a deferred FK to the dispatch row, so they fail at COMMIT if it never comes. | `dispatch` writes them all, then the row |
+| A dispatch has a carrier, a label or tracking reference and a date | `CHECK`s | `ValueError` |
+| A shipment movement belongs to a line of that shipment and that reservation | Composite FK to `stock_shipment_lines (business_id, shipment_id, id, reservation_id)`; `CHECK`s: shipment and line set together, and only on shipments | `dispatch` writes them |
+| Dispatch can't ship more than reserved, from a held or expired lot, or from a released reservation | The v1 and v2 shipment rules | `OverShipment`, `LotUnavailable`, `InvalidState` |
+| Tracking events only for a dispatched shipment, from a fixed list, at a UTC time | FK to the dispatch row; `CHECK`s | `InvalidState`, `ValueError` |
+| Tracking events never change stock, and delivered stays delivered | Events touch no stock table. Status is derived from rows that are only appended | — |
+| Shipments, lines, dispatches and events are never updated or deleted | Triggers | — |
+| One business can't see or touch another's shipments | Business-scoped FKs | `shipment()` filters by `business_id`; another business's shipment is `NotFound` |
+
 ## Running the tests
 
 From the repo root, with the venv:
@@ -184,13 +261,15 @@ From the repo root, with the venv:
 ```
 ./venv/Scripts/python.exe -B modules/logistics/tests/test_stock.py       # Windows
 ./venv/Scripts/python.exe -B modules/logistics/tests/test_lots.py
+./venv/Scripts/python.exe -B modules/logistics/tests/test_shipments.py
 ./venv/bin/python -B modules/logistics/tests/test_stock.py               # macOS / Linux
 ./venv/bin/python -B modules/logistics/tests/test_lots.py
+./venv/bin/python -B modules/logistics/tests/test_shipments.py
 ```
 
 Each test gets its own database in a temp directory. `-B` stops Python writing a `__pycache__` folder here. The tests never touch `operations_nerd/` or its database.
 
-To check that the tests catch the removal of each protection (a few minutes; it runs both test files, works on temp copies and never changes this folder):
+To check that the tests catch the removal of each protection (several minutes; it runs all three test files against each removal, 4 removals at a time, works on temp copies and never changes this folder):
 
 ```
 ./venv/Scripts/python.exe -B modules/logistics/tests/mutation_check.py   # Windows
@@ -201,7 +280,29 @@ When you add a protection, add its removal to `MUTATIONS` in that script.
 
 ### Results
 
-Run on 2026-10-23 with Python 3.11.9 and SQLite 3.45.1: **39 tests passed.** That is the 19 v1 tests in `test_stock.py`, unchanged against the v2 schema and code, and 20 lot tests in `test_lots.py`.
+Run on 2026-10-23 with Python 3.11.9 and SQLite 3.45.1: **56 tests passed.** That is the 19 v1 tests in `test_stock.py` and the 20 lot tests in `test_lots.py`, both unchanged against the v3 schema and code, plus the 17 v3 tests in `test_shipments.py`.
+
+The v3 tests:
+
+| Test | Shows |
+|---|---|
+| opening stock is its own movement kind and comes first | `opening` movements, several allowed; refused after a receipt (app and raw); lot-tracked opening into a lot; raw: no negative opening, no reservation |
+| receive and reserve is one transaction | Receipt and reservation together; replay; changed order, quantity or source conflicts; partial `reserve_quantity`; when the reservation insert fails, the receipt isn't kept either |
+| receive and reserve a lot reserves that lot | Allocated from the new lot, not the earlier-expiring one; a second delivery of the lot; `as_of` required; a held or expired lot writes nothing, not even the lot |
+| dispatch ships every line and records the shipment | Draft with nothing moved; dispatch writes one movement per line with shipment, line, date, key and `shipment:<number>`; status, carrier, refs; `shipment()` matches |
+| dispatching twice changes stock once | Replay returns the stored result; a new key is `InvalidState` (dispatched, then delivered); raw: a second dispatch row and a late movement are rejected; stock unchanged |
+| two concurrent dispatches of one shipment move stock once | Two threads, two keys, 5 trials, status read slowed. The reservation has room for a second dispatch, so only the once-only rules can stop it. Always one dispatch and one `InvalidState` |
+| one customer line shipped in two shipments | 6 + 4 of a reservation of 10 on two shipments; a third line refused while both are drafts; fulfilled after the second dispatch |
+| dispatch needs a carrier, a label or tracking reference, and shippable lines | Each input rule; no lines; a line that `ship` has since outgrown (nothing written); a released reservation; duplicate line; duplicate number; line after dispatch |
+| ship keeps working beside dispatch | `ship` 3, dispatch 5 of one reservation; the two kinds of movement side by side |
+| dispatch follows the lot rules | Dispatch passes over a held lot; refuses what only the held lot could cover (nothing written, still draft); refused the day after expiry; per-lot movement keys; recall |
+| tracking events never change stock, and a delivered shipment stays delivered | Not on a draft; a late in-transit event after delivered leaves it delivered; stock rows identical before and after; replay; bad event and time formats |
+| raw: shipments and lines are checked and immutable | Blank number or key, duplicate number or key, another business's reservation or shipment, zero quantity, a reservation twice; no update or delete |
+| raw: a dispatch ships every line in full, once, and is immutable | No lines, nothing moved, a line left out, a line short, movements whose dispatch never comes; each dispatch `CHECK`; a movement with shipment but no line, a receipt on a line, another reservation's line; second dispatch; late movement; late line; key reuse; no update or delete |
+| raw: tracking events are checked and immutable | Bad event, bad time formats, blank or reused key, another business; no update or delete; stock untouched |
+| a reused key with different content is rejected | Create, line, dispatch (carrier, tracking, date), event (event, time), and across commands; nothing written |
+| one business can't see or touch another's shipments | `shipment`, line, dispatch and event are `NotFound`; the same number is fine in another business; another business's reservation can't go on a line |
+| bad shipment input is rejected before anything is written | Every new input; the connection is still usable |
 
 The v1 tests:
 
@@ -247,7 +348,20 @@ The lot tests:
 | one business can't see or touch another's lots | Hold, release and recall are `NotFound`; `lots` is empty |
 | bad lot input is rejected before anything is written | Dates as text only, ISO only; missing `as_of`; blank lot or reason; connection still usable |
 
-**The mutation check:** 112 removals, 109 caught, 3 redundant, 0 survived. That is 46 v1 removals and 66 new ones. Each removal is one protection taken out of a temp copy, with all 39 tests run against it.
+**The mutation check:** 175 removals, 171 caught, 4 redundant, 0 survived, in under 9 minutes with 4 at a time. That is 46 v1 removals, 66 v2 and 63 v3. Each removal is one protection taken out of a temp copy, with all 56 tests run against it.
+
+v3 results:
+- **Caught (62 of 63):**
+  - **Database:** every new `CHECK`, `UNIQUE` and foreign key. That includes the dispatch primary key, removed together with the two foreign keys that use it as their parent key; on its own, every insert would fail with "foreign key mismatch" and show nothing. Also every new trigger except the dispatch no-delete one, the no-lines part of the dispatch trigger on its own, the deferred dispatch FK made immediate (every dispatch fails), and the view's "delivered stays delivered".
+  - **App:** every new check in `open_stock`, `receive_and_reserve`, `create_shipment`, `add_shipment_line`, `dispatch` and `record_tracking_event`, the business filter in `shipment()`, and timestamp validation.
+  - **Concurrency:**
+    - Reading the shipment's status outside the write lock: the race test sees "shipment movements are written before their dispatch" stop the second dispatch.
+    - The same, with every once-only rule removed (primary key, that trigger, the every-line trigger): both threads dispatch and stock moves twice. This shows the race test really detects a double dispatch.
+- **Redundant (1 new): the dispatch no-delete trigger.** Every dispatch row has shipment movements pointing at it through a foreign key, so it can't be deleted anyway. It is kept for its clearer message.
+- The first full run found five test gaps, now fixed:
+  - Two protections were rejected by a different rule first: shipments' no-update trigger (`UNIQUE` on the number) and the movement-to-line foreign key (the deferred dispatch FK, at the end of the statement).
+  - The race test let the reservation stop the second dispatch.
+  - Two removals were vacuous (the primary-key mismatch above).
 
 v2 results:
 - **Caught (all 66 new removals but one):**
@@ -285,7 +399,8 @@ The script fails if the redundant set ever changes. That check caught a real gap
 - **Stock → buying: `reserve` returns `shortage`.** That is the quantity the order wanted but couldn't get. The buying side decides whether to raise a purchase order for it.
   - Stock doesn't remember shortages. Once the goods arrive, the order calls `reserve` again with a new key for the missing quantity.
   - Suggested key: the order line id plus an attempt number.
-- **Other suggested keys:** the shipment id for `ship`, and a cancellation id for `release`.
+- **Goods bought for a waiting order: `receive_and_reserve`.** It takes the purchase reference as `source_ref` and the customer order line as `order_ref`. The receipt and the reservation are one transaction under one key. If only part of the delivery is for that line, `reserve_quantity` says how much, and the rest becomes free stock.
+- **Other suggested keys:** the shipment id for `ship` and `dispatch`, a cancellation id for `release`, and the carrier's event id for `record_tracking_event`.
 
 ## Where this differs from the brief
 
@@ -299,6 +414,16 @@ v2 (lots):
 - **`expiry_date` is optional.** A lot without one never expires and is allocated last. Some lot-tracked goods are tracked for traceability only.
 - **`release_hold` takes a reason too,** so each row of the hold history says why.
 - **The `as_of` date is stored** on every allocation and every lot shipment. The database uses it to check expiry, and it records which business date each decision was made on.
+
+v3 (opening stock and shipments). I had no copy of the LogisticsNerd schema proposal; it isn't in the repo. These choices follow the brief as written:
+- **Shipment status is derived, not a stored column.** See [above](#opening-stock-receive-and-reserve-and-shipments-v3). `shipment()` and the `stock_shipment_status` view still give it as `draft`, `dispatched` or `delivered`.
+- **Carrier, label and tracking references live on the dispatch row,** since they are what dispatch requires and they are set once. A draft shipment has none. They can't be added or changed after dispatch.
+- **`dispatch` always takes an `as_of` date,** the dispatch date, even when no line is lot-tracked. `ship` still needs it only for lots.
+- **`receive_and_reserve` takes an optional `reserve_quantity`,** for a delivery that is only partly for the waiting line. For a lot-tracked item it reserves the lot just received, not the earliest-expiring one.
+- **Opening stock must come before any receipt or shipment of the item.** "Initial" taken literally. A later count that corrects stock is an adjustment, which doesn't exist yet.
+- **Tracking events come from a fixed list** of five. Only `delivered` changes the status. Carrier-specific codes would be mapped onto these by the caller.
+- **A reservation appears on a shipment at most once.** That makes "which line created this movement" unambiguous. To ship more of it, add it to another shipment.
+- **Lines can't be removed from a draft shipment.** Lines are immutable like everything else. A wrong draft is left undispatched, and a new shipment is created.
 
 ## Known limits
 
@@ -335,3 +460,14 @@ v2 (lots):
 - **Lot shipments use derived keys.** One `ship` command writes one movement per lot, keyed `<idempotency_key>/lot:<lot_id>`. A caller that uses a key of that shape for another command could collide with it. The collision is rejected, not double-counted, since keys are unique per business.
 - **Choosing the reservation id.** Allocations are written before their reservation, so `reserve` picks the reservation's id itself (`MAX(id) + 1`), under the write lock. A writer outside `stock.py` doing the same must also hold the write lock.
 - **Every lot check reads the lot's history.** The view sums a lot's movements and allocations each time. This is indexed by lot, but it grows with history, like the item-level checks.
+
+### Limits added by shipments (v3)
+
+- **Every v3 change touches existing tables, so the migration gap is wider.** `stock_movements` gained two columns, two foreign keys and two `CHECK`s, and its type `CHECK` now allows `opening`. A database created by v1 or v2 can't take any of that without rebuilding the table (see [Limits added by lots](#limits-added-by-lots-v2)).
+- **No cancelling a draft shipment, and no removing lines.** An abandoned draft keeps its lines, and they count against the reservation when planning other shipments. `release` on the reservation still works, and `dispatch` of that draft then fails.
+- **Planning is checked only by the app.** The database doesn't stop draft lines from asking for more than is left to ship. It stops the dispatch instead. Mixing `ship` with planned lines can leave a draft that can no longer be dispatched.
+- **No returns or failed deliveries.** A `delivery_failed` or `exception` event is only recorded. Nothing brings stock back, which would need a return movement type.
+- **Event times are trusted.** The database checks their format, not that they are after the dispatch, or in order.
+- **Recall doesn't show shipments yet.** It lists reservations per lot. The shipment numbers a lot left on can be read from `shipment_id` on its movements, but `recall` doesn't return them.
+- **`dispatch` movement keys are derived** (`<key>/line:<id>[/lot:<id>]`), with the same caution as lot shipments.
+- **The carrier is free text.** There is no carrier list, label generation or rate lookup. Those belong to a carrier integration.

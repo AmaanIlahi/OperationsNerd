@@ -1,6 +1,7 @@
 """
-LogisticsNerd stock engine, v2: v1 plus lots and expiry. Standalone: stdlib
-sqlite3 only, nothing from operations_nerd/, no LLM calls.
+LogisticsNerd stock engine, v3: v1, plus lots and expiry (v2), plus opening stock,
+receive-and-reserve and shipment records (v3). Standalone: stdlib sqlite3 only,
+nothing from operations_nerd/, no LLM calls.
 
 Stock is a ledger. on_hand is the sum of stock_movements, reserved is the
 unshipped part of active stock_reservations, and available is on_hand minus
@@ -20,6 +21,12 @@ earliest expiry first and skips held and expired ones, and ship ships from the
 reservation's allocations lot by lot. Expiry is judged against an as_of date
 the caller passes in ('YYYY-MM-DD'), never the clock. A lot is expired on any
 date after its expiry_date.
+
+A shipment is a record: create_shipment, add_shipment_line for each reservation
+it carries, then dispatch once, which writes the stock movements and the
+dispatch together. Its status (draft, dispatched, delivered) is derived from the
+dispatch and the tracking events, which only append. ship still ships a
+reservation directly, without a record.
 
 Open connections with connect(); it sets autocommit mode, which the explicit
 BEGIN IMMEDIATE relies on, and turns on the foreign keys that tie each
@@ -105,35 +112,83 @@ def receive(conn, business_id: int, item_id: int, quantity: int, source_ref: str
     creates it with its expiry_date (None: it does not expire); later receipts of the same lot must
     give the same expiry_date. One purchase order line can be received as several lots, one call each.
     """
-    _positive_int("business_id", business_id)
-    _positive_int("item_id", item_id)
-    _positive_int("quantity", quantity)
-    _text("source_ref", source_ref)
-    if lot_number is not None:
-        _text("lot_number", lot_number)
-    if expiry_date is not None:
-        _date("expiry_date", expiry_date)
-        if lot_number is None:
-            raise ValueError("expiry_date needs a lot_number")
+    _check_stock_input(business_id, item_id, quantity, source_ref, lot_number, expiry_date)
 
     def work():
-        tracked = _lot_tracked(conn, business_id, item_id)
-        if tracked and lot_number is None:
-            raise LotMismatch(f"item {item_id} is lot-tracked: receive needs a lot_number")
-        if not tracked and lot_number is not None:
-            raise LotMismatch(f"item {item_id} is not lot-tracked: receive takes no lot_number")
-        lot_id = _lot_for_receipt(conn, business_id, item_id, lot_number, expiry_date) if tracked else None
-        movement_id = _insert_movement(conn, business_id, item_id, LOCATION_ID, quantity, "receipt", source_ref,
-                                       idempotency_key, lot_id=lot_id)
-        result = {"movement_id": movement_id, "item_id": item_id, "received": quantity}
-        if tracked:
-            result.update(lot_id=lot_id, lot_number=lot_number, expiry_date=expiry_date)
+        return _add_stock(conn, business_id, item_id, quantity, "receipt", source_ref, idempotency_key, lot_number,
+                          expiry_date, "receive")
+
+    payload = _stock_payload(item_id, quantity, source_ref, lot_number, expiry_date)
+    return _run(conn, business_id, idempotency_key, "receive", payload, work)
+
+
+def open_stock(conn, business_id: int, item_id: int, quantity: int, source_ref: str, idempotency_key: str,
+               lot_number: str | None = None, expiry_date: str | None = None) -> dict:
+    """Records stock that was there before the system: an 'opening' movement, not a supplier receipt.
+
+    Only before any receipt or shipment of the item; several opening movements are fine (one per lot,
+    say). source_ref says where the figure came from, for example a stock count. Lots work as in receive,
+    so a lot-tracked item needs track_lots first.
+    """
+    _check_stock_input(business_id, item_id, quantity, source_ref, lot_number, expiry_date)
+
+    def work():
+        if conn.execute("""SELECT 1 FROM stock_movements WHERE business_id = ? AND item_id = ?
+                           AND movement_type <> 'opening' LIMIT 1""", (business_id, item_id)).fetchone():
+            raise InvalidState(f"item {item_id} already has receipts or shipments: opening stock comes first")
+        return _add_stock(conn, business_id, item_id, quantity, "opening", source_ref, idempotency_key, lot_number,
+                          expiry_date, "open_stock")
+
+    payload = _stock_payload(item_id, quantity, source_ref, lot_number, expiry_date)
+    return _run(conn, business_id, idempotency_key, "open_stock", payload, work)
+
+
+def receive_and_reserve(conn, business_id: int, item_id: int, quantity: int, source_ref: str, order_ref: str,
+                        idempotency_key: str, lot_number: str | None = None, expiry_date: str | None = None,
+                        as_of: str | None = None, reserve_quantity: int | None = None) -> dict:
+    """Receives stock and reserves it for a waiting order line, in one transaction.
+
+    source_ref is the purchase reference, order_ref the customer order line. reserve_quantity (default:
+    all of quantity) is how much of the receipt goes to that line; the rest is free stock. For a
+    lot-tracked item as_of is required and the reservation is allocated from the lot just received, not
+    earliest expiry first: these are the goods bought for that order. If that lot is held or expired on
+    as_of it raises LotUnavailable and writes nothing, receipt included.
+    """
+    _check_stock_input(business_id, item_id, quantity, source_ref, lot_number, expiry_date)
+    _text("order_ref", order_ref)
+    if as_of is not None:
+        _date("as_of", as_of)
+    if reserve_quantity is not None:
+        _positive_int("reserve_quantity", reserve_quantity)
+        if reserve_quantity > quantity:
+            raise ValueError(f"reserve_quantity {reserve_quantity} is more than the {quantity} received")
+    to_reserve = quantity if reserve_quantity is None else reserve_quantity
+
+    def work():
+        if _lot_tracked(conn, business_id, item_id) and as_of is None:
+            raise ValueError(f"item {item_id} is lot-tracked: receive_and_reserve needs as_of")
+        result = _add_stock(conn, business_id, item_id, quantity, "receipt", source_ref, idempotency_key, lot_number,
+                            expiry_date, "receive_and_reserve")
+        if "lot_id" in result:
+            lot = _lot(conn, business_id, result["lot_id"])
+            if lot["on_hold"] or _expired(lot["expiry_date"], as_of):
+                state = "held" if lot["on_hold"] else f"expired on {as_of}"
+                raise LotUnavailable(f"lot {lot_number!r} is {state}: nothing received or reserved")
+            reservation_id = _insert_lot_reservation(conn, business_id, item_id, order_ref, idempotency_key,
+                                                     [(lot, to_reserve)], as_of)
+        else:
+            reservation_id = conn.execute(
+                """INSERT INTO stock_reservations (business_id, item_id, location_id, order_ref, quantity, idempotency_key)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (business_id, item_id, LOCATION_ID, order_ref, to_reserve, idempotency_key)).lastrowid
+        result.update(reservation_id=reservation_id, order_ref=order_ref, reserved=to_reserve)
         return result
 
-    payload = {"item_id": item_id, "quantity": quantity, "source_ref": source_ref}
-    if lot_number is not None:
-        payload.update(lot_number=lot_number, expiry_date=expiry_date)
-    return _run(conn, business_id, idempotency_key, "receive", payload, work)
+    payload = _stock_payload(item_id, quantity, source_ref, lot_number, expiry_date)
+    payload.update(order_ref=order_ref, reserve_quantity=to_reserve)
+    if as_of is not None:
+        payload["as_of"] = as_of
+    return _run(conn, business_id, idempotency_key, "receive_and_reserve", payload, work)
 
 
 def reserve(conn, business_id: int, item_id: int, quantity: int, order_ref: str, idempotency_key: str,
@@ -251,6 +306,144 @@ def release_hold(conn, business_id: int, lot_id: int, reason: str, idempotency_k
     return _hold_event(conn, business_id, lot_id, reason, idempotency_key, "release")
 
 
+def create_shipment(conn, business_id: int, shipment_number: str, idempotency_key: str) -> dict:
+    """Starts a draft shipment. shipment_number is unique per business."""
+    _positive_int("business_id", business_id)
+    _text("shipment_number", shipment_number)
+
+    def work():
+        taken = conn.execute("SELECT id FROM stock_shipments WHERE business_id = ? AND shipment_number = ?",
+                             (business_id, shipment_number)).fetchone()
+        if taken:
+            raise InvalidState(f"shipment number {shipment_number!r} is already shipment {taken['id']}")
+        shipment_id = conn.execute("""INSERT INTO stock_shipments (business_id, shipment_number, idempotency_key)
+                                      VALUES (?, ?, ?)""", (business_id, shipment_number, idempotency_key)).lastrowid
+        return {"shipment_id": shipment_id, "shipment_number": shipment_number, "status": "draft"}
+
+    return _run(conn, business_id, idempotency_key, "create_shipment", {"shipment_number": shipment_number}, work)
+
+
+def add_shipment_line(conn, business_id: int, shipment_id: int, reservation_id: int, quantity: int,
+                      idempotency_key: str) -> dict:
+    """Puts part or all of an active reservation on a draft shipment. Nothing moves until dispatch.
+
+    A reservation can be on several shipments, once each. quantity can't exceed what is left to ship
+    minus what is already on other draft shipments.
+    """
+    _positive_int("business_id", business_id)
+    _positive_int("shipment_id", shipment_id)
+    _positive_int("reservation_id", reservation_id)
+    _positive_int("quantity", quantity)
+
+    def work():
+        shp = shipment(conn, business_id, shipment_id)
+        if shp["status"] != "draft":
+            raise InvalidState(f"shipment {shipment_id} is {shp['status']}: lines are added before dispatch")
+        if any(line["reservation_id"] == reservation_id for line in shp["lines"]):
+            raise InvalidState(f"reservation {reservation_id} is already on shipment {shipment_id}")
+        r = _active_reservation(conn, business_id, reservation_id)
+        planned = conn.execute(
+            """SELECT COALESCE(SUM(l.quantity), 0) FROM stock_shipment_lines l
+               WHERE l.business_id = ? AND l.reservation_id = ?
+                 AND NOT EXISTS (SELECT 1 FROM stock_shipment_dispatches d
+                                 WHERE d.business_id = l.business_id AND d.shipment_id = l.shipment_id)""",
+            (business_id, reservation_id)).fetchone()[0]
+        left = r["quantity"] - r["quantity_shipped"] - planned
+        if quantity > left:
+            raise OverShipment(f"cannot add {quantity}: reservation {reservation_id} has {left} left to ship "
+                               f"that is not already on a draft shipment")
+        line_id = conn.execute("""INSERT INTO stock_shipment_lines (business_id, shipment_id, reservation_id, quantity,
+                                                                    idempotency_key)
+                                  VALUES (?, ?, ?, ?, ?)""",
+                               (business_id, shipment_id, reservation_id, quantity, idempotency_key)).lastrowid
+        return {"line_id": line_id, "shipment_id": shipment_id, "reservation_id": reservation_id, "quantity": quantity}
+
+    payload = {"shipment_id": shipment_id, "reservation_id": reservation_id, "quantity": quantity}
+    return _run(conn, business_id, idempotency_key, "add_shipment_line", payload, work)
+
+
+def dispatch(conn, business_id: int, shipment_id: int, carrier: str, idempotency_key: str, as_of: str,
+             label_ref: str | None = None, tracking_ref: str | None = None) -> dict:
+    """Dispatches a draft shipment, once: writes every line's shipment movements and the dispatch record together.
+
+    Needs a carrier and a label_ref or tracking_ref. as_of is the dispatch date. Each line ships as
+    ship does: one movement for an item without lots, or one per lot for a lot-tracked item, by the
+    same rules (earliest expiry first, past held and expired lots, LotUnavailable if they can't cover
+    the line). If any line can't ship, nothing is written. Returns the shipment, as shipment() does.
+    """
+    _positive_int("business_id", business_id)
+    _positive_int("shipment_id", shipment_id)
+    _text("carrier", carrier)
+    _date("as_of", as_of)
+    for name, value in (("label_ref", label_ref), ("tracking_ref", tracking_ref)):
+        if value is not None:
+            _text(name, value)
+    if label_ref is None and tracking_ref is None:
+        raise ValueError("dispatch needs a label_ref or a tracking_ref")
+
+    def work():
+        shp = shipment(conn, business_id, shipment_id)
+        if shp["status"] != "draft":
+            raise InvalidState(f"shipment {shipment_id} is already {shp['status']}")
+        if not shp["lines"]:
+            raise InvalidState(f"shipment {shipment_id} has no lines")
+        source_ref = f"shipment:{shp['shipment_number']}"
+        for line in shp["lines"]:
+            r = _active_reservation(conn, business_id, line["reservation_id"])
+            remaining = r["quantity"] - r["quantity_shipped"]
+            if line["quantity"] > remaining:
+                raise OverShipment(f"cannot dispatch line {line['line_id']}: reservation {r['id']} has {remaining} "
+                                   f"left to ship, the line has {line['quantity']}")
+            key = f"{idempotency_key}/line:{line['line_id']}"
+            if _lot_tracked(conn, business_id, r["item_id"]):
+                _ship_lots(conn, business_id, r, line["quantity"], key, as_of, source_ref, shipment_id, line["line_id"])
+            else:
+                _insert_movement(conn, business_id, r["item_id"], r["location_id"], -line["quantity"], "shipment",
+                                 source_ref, key, r["id"], as_of=as_of, shipment_id=shipment_id,
+                                 shipment_line_id=line["line_id"])
+        conn.execute("""INSERT INTO stock_shipment_dispatches (business_id, shipment_id, carrier, label_ref, tracking_ref,
+                                                               as_of, idempotency_key)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                     (business_id, shipment_id, carrier, label_ref, tracking_ref, as_of, idempotency_key))
+        return shipment(conn, business_id, shipment_id)
+
+    payload = {"shipment_id": shipment_id, "carrier": carrier, "label_ref": label_ref, "tracking_ref": tracking_ref,
+               "as_of": as_of}
+    return _run(conn, business_id, idempotency_key, "dispatch", payload, work)
+
+
+TRACKING_EVENTS = ("in_transit", "out_for_delivery", "delivery_failed", "delivered", "exception")
+
+
+def record_tracking_event(conn, business_id: int, shipment_id: int, event: str, occurred_at: str,
+                          idempotency_key: str, detail: str | None = None) -> dict:
+    """Appends a carrier tracking event to a dispatched shipment. It never changes stock.
+
+    occurred_at is the carrier's time, 'YYYY-MM-DDTHH:MM:SSZ'. A delivered event makes the shipment
+    delivered for good: events that arrive later, whatever their time, don't move it back.
+    """
+    _positive_int("business_id", business_id)
+    _positive_int("shipment_id", shipment_id)
+    if event not in TRACKING_EVENTS:
+        raise ValueError(f"event must be one of {', '.join(TRACKING_EVENTS)}, got {event!r}")
+    _timestamp("occurred_at", occurred_at)
+    if detail is not None:
+        _text("detail", detail)
+
+    def work():
+        if shipment(conn, business_id, shipment_id)["status"] == "draft":
+            raise InvalidState(f"shipment {shipment_id} is not dispatched yet")
+        event_id = conn.execute("""INSERT INTO stock_shipment_events (business_id, shipment_id, event, occurred_at, detail,
+                                                                      idempotency_key)
+                                   VALUES (?, ?, ?, ?, ?, ?)""",
+                                (business_id, shipment_id, event, occurred_at, detail, idempotency_key)).lastrowid
+        return {"event_id": event_id, "shipment_id": shipment_id, "event": event,
+                "status": shipment(conn, business_id, shipment_id)["status"]}
+
+    payload = {"shipment_id": shipment_id, "event": event, "occurred_at": occurred_at, "detail": detail}
+    return _run(conn, business_id, idempotency_key, "record_tracking_event", payload, work)
+
+
 # ---------------------------------------------------------------- queries
 
 def on_hand(conn, business_id: int, item_id: int) -> int:
@@ -302,7 +495,7 @@ def recall(conn, business_id: int, lot_id: int) -> dict:
     _positive_int("lot_id", lot_id)
     lot = _lot(conn, business_id, lot_id)
     received = conn.execute("""SELECT COALESCE(SUM(quantity), 0) FROM stock_movements
-                               WHERE business_id = ? AND lot_id = ? AND movement_type = 'receipt'""",
+                               WHERE business_id = ? AND lot_id = ? AND movement_type IN ('receipt', 'opening')""",
                             (business_id, lot_id)).fetchone()[0]
     rows = conn.execute(
         """SELECT a.reservation_id, r.order_ref, r.status, a.quantity AS allocated,
@@ -319,6 +512,31 @@ def recall(conn, business_id: int, lot_id: int) -> dict:
 
 
 _LOT_COLUMNS = "lot_id, item_id, lot_number, expiry_date, on_hand, allocated, on_hold"
+
+
+def shipment(conn, business_id: int, shipment_id: int) -> dict:
+    """A shipment: number, derived status (draft, dispatched, delivered), dispatch details, lines with
+    the movements each one created, and tracking events in the order they were recorded."""
+    row = conn.execute("SELECT * FROM stock_shipment_status WHERE shipment_id = ? AND business_id = ?",
+                       (shipment_id, business_id)).fetchone()
+    if row is None:
+        raise NotFound(f"no shipment {shipment_id} in business {business_id}")
+    lines = []
+    for line in conn.execute("""SELECT l.id AS line_id, l.reservation_id, r.order_ref, r.item_id, l.quantity
+                                FROM stock_shipment_lines l
+                                JOIN stock_reservations r ON r.business_id = l.business_id AND r.id = l.reservation_id
+                                WHERE l.business_id = ? AND l.shipment_id = ? ORDER BY l.id""",
+                             (business_id, shipment_id)).fetchall():
+        moves = conn.execute("""SELECT m.id AS movement_id, m.lot_id, lot.lot_number, -m.quantity AS quantity
+                                FROM stock_movements m LEFT JOIN stock_lots lot ON lot.id = m.lot_id
+                                WHERE m.business_id = ? AND m.shipment_line_id = ? ORDER BY m.id""",
+                             (business_id, line["line_id"]))
+        lines.append(dict(line) | {"movements": [dict(m) for m in moves]})
+    events = conn.execute("""SELECT id AS event_id, event, occurred_at, detail FROM stock_shipment_events
+                             WHERE business_id = ? AND shipment_id = ? ORDER BY id""", (business_id, shipment_id))
+    out = {k: row[k] for k in ("shipment_id", "shipment_number", "status", "carrier", "label_ref", "tracking_ref",
+                               "dispatched_on")}
+    return out | {"lines": lines, "events": [dict(e) for e in events]}
 
 
 # ---------------------------------------------------------------- internals
@@ -348,14 +566,51 @@ def _run(conn, business_id, idempotency_key, command, payload, work):
 
 
 def _insert_movement(conn, business_id, item_id, location_id, quantity, movement_type, source_ref, idempotency_key,
-                     reservation_id=None, lot_id=None, as_of=None):
+                     reservation_id=None, lot_id=None, as_of=None, shipment_id=None, shipment_line_id=None):
     return conn.execute(
         """INSERT INTO stock_movements (business_id, item_id, location_id, quantity, movement_type, reservation_id,
-                                        lot_id, as_of, source_ref, idempotency_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (business_id, item_id, location_id, quantity, movement_type, reservation_id, lot_id, as_of, source_ref,
-         idempotency_key),
+                                        lot_id, as_of, shipment_id, shipment_line_id, source_ref, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (business_id, item_id, location_id, quantity, movement_type, reservation_id, lot_id, as_of, shipment_id,
+         shipment_line_id, source_ref, idempotency_key),
     ).lastrowid
+
+
+def _check_stock_input(business_id, item_id, quantity, source_ref, lot_number, expiry_date):
+    _positive_int("business_id", business_id)
+    _positive_int("item_id", item_id)
+    _positive_int("quantity", quantity)
+    _text("source_ref", source_ref)
+    if lot_number is not None:
+        _text("lot_number", lot_number)
+    if expiry_date is not None:
+        _date("expiry_date", expiry_date)
+        if lot_number is None:
+            raise ValueError("expiry_date needs a lot_number")
+
+
+def _stock_payload(item_id, quantity, source_ref, lot_number, expiry_date) -> dict:
+    payload = {"item_id": item_id, "quantity": quantity, "source_ref": source_ref}
+    if lot_number is not None:
+        payload.update(lot_number=lot_number, expiry_date=expiry_date)
+    return payload
+
+
+def _add_stock(conn, business_id, item_id, quantity, movement_type, source_ref, idempotency_key, lot_number,
+               expiry_date, command) -> dict:
+    """Writes one positive movement (a receipt or opening stock), into its lot if the item is lot-tracked."""
+    tracked = _lot_tracked(conn, business_id, item_id)
+    if tracked and lot_number is None:
+        raise LotMismatch(f"item {item_id} is lot-tracked: {command} needs a lot_number")
+    if not tracked and lot_number is not None:
+        raise LotMismatch(f"item {item_id} is not lot-tracked: {command} takes no lot_number")
+    lot_id = _lot_for_receipt(conn, business_id, item_id, lot_number, expiry_date) if tracked else None
+    movement_id = _insert_movement(conn, business_id, item_id, LOCATION_ID, quantity, movement_type, source_ref,
+                                   idempotency_key, lot_id=lot_id)
+    result = {"movement_id": movement_id, "item_id": item_id, "received": quantity}
+    if tracked:
+        result.update(lot_id=lot_id, lot_number=lot_number, expiry_date=expiry_date)
+    return result
 
 
 def _active_reservation(conn, business_id, reservation_id):
@@ -399,25 +654,33 @@ def _reserve_lots(conn, business_id, item_id, quantity, order_ref, idempotency_k
     reserved_now = quantity - left
     reservation_id = None
     if reserved_now:
-        # The allocations reference the reservation before it exists (a deferred foreign key), so its id is
-        # chosen here. BEGIN IMMEDIATE holds the write lock, so no other writer can take it meanwhile.
-        reservation_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM stock_reservations").fetchone()[0]
-        for lot, take in plan:
-            conn.execute("""INSERT INTO stock_allocations (business_id, reservation_id, item_id, lot_id, quantity, as_of)
-                            VALUES (?, ?, ?, ?, ?, ?)""", (business_id, reservation_id, item_id, lot["lot_id"], take, as_of))
-        conn.execute("""INSERT INTO stock_reservations (id, business_id, item_id, location_id, order_ref, quantity,
-                                                        idempotency_key)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                     (reservation_id, business_id, item_id, LOCATION_ID, order_ref, reserved_now, idempotency_key))
+        reservation_id = _insert_lot_reservation(conn, business_id, item_id, order_ref, idempotency_key, plan, as_of)
     return {"reservation_id": reservation_id, "item_id": item_id, "requested": quantity,
             "reserved": reserved_now, "shortage": left,
             "allocations": [{"lot_id": lot["lot_id"], "lot_number": lot["lot_number"],
                              "expiry_date": lot["expiry_date"], "quantity": take} for lot, take in plan]}
 
 
-def _ship_lots(conn, business_id, r, quantity, idempotency_key, as_of):
+def _insert_lot_reservation(conn, business_id, item_id, order_ref, idempotency_key, plan, as_of) -> int:
+    """Writes the allocations [(lot, quantity)] and, last, their reservation for the plan's total."""
+    # The allocations reference the reservation before it exists (a deferred foreign key), so its id is
+    # chosen here. BEGIN IMMEDIATE holds the write lock, so no other writer can take it meanwhile.
+    reservation_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM stock_reservations").fetchone()[0]
+    for lot, take in plan:
+        conn.execute("""INSERT INTO stock_allocations (business_id, reservation_id, item_id, lot_id, quantity, as_of)
+                        VALUES (?, ?, ?, ?, ?, ?)""", (business_id, reservation_id, item_id, lot["lot_id"], take, as_of))
+    conn.execute("""INSERT INTO stock_reservations (id, business_id, item_id, location_id, order_ref, quantity,
+                                                    idempotency_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                 (reservation_id, business_id, item_id, LOCATION_ID, order_ref, sum(take for _, take in plan),
+                  idempotency_key))
+    return reservation_id
+
+
+def _ship_lots(conn, business_id, r, quantity, idempotency_key, as_of, source_ref=None, shipment_id=None,
+               shipment_line_id=None):
     """Ships from the reservation's allocations earliest expiry first, one movement per lot, passing over
-    held and expired lots. Each movement's key is the command's key plus the lot, since one command writes several.
+    held and expired lots. Each movement's key is the given key plus the lot, since one command writes several.
     """
     if as_of is None:
         raise ValueError(f"item {r['item_id']} is lot-tracked: ship needs as_of")
@@ -438,8 +701,9 @@ def _ship_lots(conn, business_id, r, quantity, idempotency_key, as_of):
             continue
         take = min(need, a["left_to_ship"])
         movement_id = _insert_movement(conn, business_id, r["item_id"], r["location_id"], -take, "shipment",
-                                       f"reservation:{r['id']}", f"{idempotency_key}/lot:{a['lot_id']}", r["id"],
-                                       lot_id=a["lot_id"], as_of=as_of)
+                                       source_ref or f"reservation:{r['id']}", f"{idempotency_key}/lot:{a['lot_id']}",
+                                       r["id"], lot_id=a["lot_id"], as_of=as_of, shipment_id=shipment_id,
+                                       shipment_line_id=shipment_line_id)
         shipped.append({"lot_id": a["lot_id"], "lot_number": a["lot_number"], "quantity": take,
                         "movement_id": movement_id})
         need -= take
@@ -494,6 +758,16 @@ def _positive_int(name, value):
 def _text(name, value):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string, got {value!r}")
+
+
+def _timestamp(name, value):
+    try:
+        ok = isinstance(value, str) and \
+            datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%SZ") == value
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ValueError(f"{name} must be a UTC time as 'YYYY-MM-DDTHH:MM:SSZ', got {value!r}")
 
 
 def _date(name, value):

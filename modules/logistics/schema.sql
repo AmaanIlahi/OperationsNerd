@@ -1,4 +1,5 @@
--- LogisticsNerd stock engine, v2: v1 plus lots and expiry (the lots section at the end).
+-- LogisticsNerd stock engine, v3: v1, plus lots and expiry (v2), plus opening stock and
+-- shipment records (v3). Each later version has its own section at the end.
 -- Stock is a ledger: on hand is the sum of stock_movements, reserved is the
 -- unshipped part of active stock_reservations. Nothing holds a running total
 -- that a caller edits: quantity_shipped is kept equal to the reservation's
@@ -14,7 +15,9 @@ CREATE TABLE IF NOT EXISTS stock_commands (
     business_id     INTEGER NOT NULL,
     idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
     command         TEXT    NOT NULL CHECK (command IN ('receive', 'reserve', 'release', 'ship',
-                                                            'track_lots', 'hold_lot', 'release_hold')),
+                                                            'track_lots', 'hold_lot', 'release_hold',
+                                                            'open_stock', 'receive_and_reserve', 'create_shipment',
+                                                            'add_shipment_line', 'dispatch', 'record_tracking_event')),
     payload         TEXT    NOT NULL,
     result          TEXT    NOT NULL,
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -54,7 +57,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     movement_type   TEXT    NOT NULL,
     reservation_id  INTEGER,
     lot_id          INTEGER,                 -- set exactly when the item is lot-tracked
-    as_of           TEXT    CHECK (as_of IS date(as_of)),   -- the business date a lot shipment was checked against
+    as_of           TEXT    CHECK (as_of IS date(as_of)),   -- the business date of a lot shipment or a dispatch
+    shipment_id      INTEGER,                -- set exactly when a dispatch wrote the movement
+    shipment_line_id INTEGER,
     source_ref      TEXT    NOT NULL CHECK (source_ref <> ''),
     idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -62,9 +67,15 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     FOREIGN KEY (business_id, reservation_id) REFERENCES stock_reservations (business_id, id),
     FOREIGN KEY (business_id, item_id, lot_id) REFERENCES stock_lots (business_id, item_id, id),
     FOREIGN KEY (business_id, reservation_id, lot_id) REFERENCES stock_allocations (business_id, reservation_id, lot_id),
-    CHECK ((movement_type = 'receipt' AND quantity > 0) OR (movement_type = 'shipment' AND quantity < 0)),
+    FOREIGN KEY (business_id, shipment_id, shipment_line_id, reservation_id)
+        REFERENCES stock_shipment_lines (business_id, shipment_id, id, reservation_id),
+    FOREIGN KEY (business_id, shipment_id) REFERENCES stock_shipment_dispatches (business_id, shipment_id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CHECK ((movement_type IN ('receipt', 'opening') AND quantity > 0) OR (movement_type = 'shipment' AND quantity < 0)),
     CHECK ((movement_type = 'shipment') = (reservation_id IS NOT NULL)),
-    CHECK (movement_type <> 'shipment' OR lot_id IS NULL OR as_of IS NOT NULL)
+    CHECK (movement_type <> 'shipment' OR lot_id IS NULL OR as_of IS NOT NULL),
+    CHECK ((shipment_id IS NULL) = (shipment_line_id IS NULL)),
+    CHECK (shipment_line_id IS NULL OR movement_type = 'shipment')
 );
 
 CREATE INDEX IF NOT EXISTS stock_movements_item ON stock_movements (business_id, item_id, location_id);
@@ -316,3 +327,142 @@ CREATE TRIGGER IF NOT EXISTS stock_movements_lot_on_hand_not_negative BEFORE INS
 WHEN NEW.quantity < 0 AND NEW.lot_id IS NOT NULL
  AND NEW.quantity + (SELECT on_hand FROM stock_lot_levels WHERE lot_id = NEW.lot_id) < 0
 BEGIN SELECT RAISE(ABORT, 'lot on hand would go negative'); END;
+
+-- ---------------------------------------------------------------- opening stock and shipments (v3)
+-- Opening stock is its own movement kind, written before anything else moves
+-- for the item. A shipment is a record: a number, lines (reservation, quantity)
+-- and, once, a dispatch with carrier, label or tracking reference and date.
+-- Dispatch writes each line's shipment movements first, then the dispatch row,
+-- whose insert checks that every line moved in full; the movements' deferred
+-- foreign key to the dispatch row makes the transaction fail at COMMIT if the
+-- dispatch never comes. Status is derived (stock_shipment_status), never stored:
+-- delivered once a delivered event exists, else dispatched once the dispatch
+-- row exists, else draft. Tracking events only append; nothing they write
+-- touches stock.
+
+-- Opening stock comes before any receipt or shipment of the item.
+CREATE TRIGGER IF NOT EXISTS stock_movements_opening_first BEFORE INSERT ON stock_movements
+WHEN NEW.movement_type = 'opening'
+ AND EXISTS (SELECT 1 FROM stock_movements WHERE business_id = NEW.business_id AND item_id = NEW.item_id
+                                             AND movement_type <> 'opening')
+BEGIN SELECT RAISE(ABORT, 'opening stock comes before any other movement of the item'); END;
+
+CREATE TABLE IF NOT EXISTS stock_shipments (
+    id              INTEGER PRIMARY KEY,
+    business_id     INTEGER NOT NULL,
+    shipment_number TEXT    NOT NULL CHECK (shipment_number <> ''),
+    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (business_id, shipment_number),
+    UNIQUE (business_id, idempotency_key),
+    UNIQUE (business_id, id)                 -- the parent key for lines and the dispatch
+);
+
+CREATE TRIGGER IF NOT EXISTS stock_shipments_no_update BEFORE UPDATE ON stock_shipments
+BEGIN SELECT RAISE(ABORT, 'stock_shipments rows are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipments_no_delete BEFORE DELETE ON stock_shipments
+BEGIN SELECT RAISE(ABORT, 'stock_shipments rows are immutable'); END;
+
+CREATE TABLE IF NOT EXISTS stock_shipment_lines (
+    id              INTEGER PRIMARY KEY,
+    business_id     INTEGER NOT NULL,
+    shipment_id     INTEGER NOT NULL,
+    reservation_id  INTEGER NOT NULL,
+    quantity        INTEGER NOT NULL CHECK (quantity > 0),
+    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (business_id, shipment_id, reservation_id),        -- a reservation is on a shipment at most once
+    UNIQUE (business_id, shipment_id, id, reservation_id),    -- the parent key for the movements a line creates
+    UNIQUE (business_id, idempotency_key),
+    FOREIGN KEY (business_id, shipment_id) REFERENCES stock_shipments (business_id, id),
+    FOREIGN KEY (business_id, reservation_id) REFERENCES stock_reservations (business_id, id)
+);
+
+-- Lines are added while the shipment is a draft.
+CREATE TRIGGER IF NOT EXISTS stock_shipment_lines_before_dispatch BEFORE INSERT ON stock_shipment_lines
+WHEN EXISTS (SELECT 1 FROM stock_shipment_dispatches WHERE business_id = NEW.business_id AND shipment_id = NEW.shipment_id)
+BEGIN SELECT RAISE(ABORT, 'lines are added before dispatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_lines_no_update BEFORE UPDATE ON stock_shipment_lines
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_lines rows are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_lines_no_delete BEFORE DELETE ON stock_shipment_lines
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_lines rows are immutable'); END;
+
+CREATE INDEX IF NOT EXISTS stock_movements_shipment_line ON stock_movements (business_id, shipment_line_id);
+
+-- One per dispatched shipment: dispatch happens exactly once. No foreign key to
+-- stock_shipments: the trigger below requires the shipment to have lines, and
+-- lines have that foreign key, so it could never be the rule that rejects.
+CREATE TABLE IF NOT EXISTS stock_shipment_dispatches (
+    business_id     INTEGER NOT NULL,
+    shipment_id     INTEGER NOT NULL,
+    carrier         TEXT    NOT NULL CHECK (carrier <> ''),
+    label_ref       TEXT    CHECK (label_ref <> ''),
+    tracking_ref    TEXT    CHECK (tracking_ref <> ''),
+    as_of           TEXT    NOT NULL CHECK (as_of IS date(as_of)),   -- the dispatch date
+    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (business_id, shipment_id),
+    UNIQUE (business_id, idempotency_key),
+    CHECK (label_ref IS NOT NULL OR tracking_ref IS NOT NULL)
+);
+
+-- A shipment movement is written by its dispatch, before the dispatch row, never after.
+CREATE TRIGGER IF NOT EXISTS stock_movements_before_dispatch BEFORE INSERT ON stock_movements
+WHEN NEW.shipment_id IS NOT NULL
+ AND EXISTS (SELECT 1 FROM stock_shipment_dispatches WHERE business_id = NEW.business_id AND shipment_id = NEW.shipment_id)
+BEGIN SELECT RAISE(ABORT, 'shipment movements are written before their dispatch'); END;
+
+-- A dispatch ships a shipment that has lines, and every line in full.
+CREATE TRIGGER IF NOT EXISTS stock_shipment_dispatches_ship_every_line BEFORE INSERT ON stock_shipment_dispatches
+WHEN NOT EXISTS (SELECT 1 FROM stock_shipment_lines WHERE business_id = NEW.business_id AND shipment_id = NEW.shipment_id)
+  OR EXISTS (SELECT 1 FROM stock_shipment_lines l
+              WHERE l.business_id = NEW.business_id AND l.shipment_id = NEW.shipment_id
+                AND l.quantity <> (SELECT COALESCE(-SUM(m.quantity), 0) FROM stock_movements m
+                                    WHERE m.business_id = l.business_id AND m.shipment_line_id = l.id))
+BEGIN SELECT RAISE(ABORT, 'a dispatch ships every line of its shipment in full'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_dispatches_no_update BEFORE UPDATE ON stock_shipment_dispatches
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_dispatches rows are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_dispatches_no_delete BEFORE DELETE ON stock_shipment_dispatches
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_dispatches rows are immutable'); END;
+
+-- Carrier tracking events, append-only. Only a dispatched shipment has any (the
+-- foreign key is to the dispatch row).
+CREATE TABLE IF NOT EXISTS stock_shipment_events (
+    id              INTEGER PRIMARY KEY,
+    business_id     INTEGER NOT NULL,
+    shipment_id     INTEGER NOT NULL,
+    event           TEXT    NOT NULL CHECK (event IN ('in_transit', 'out_for_delivery', 'delivery_failed',
+                                                      'delivered', 'exception')),
+    occurred_at     TEXT    NOT NULL CHECK (occurred_at IS strftime('%Y-%m-%dT%H:%M:%SZ', occurred_at)),
+    detail          TEXT,
+    idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (business_id, idempotency_key),
+    FOREIGN KEY (business_id, shipment_id) REFERENCES stock_shipment_dispatches (business_id, shipment_id)
+);
+
+CREATE INDEX IF NOT EXISTS stock_shipment_events_shipment ON stock_shipment_events (business_id, shipment_id);
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_events_no_update BEFORE UPDATE ON stock_shipment_events
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_events rows are immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS stock_shipment_events_no_delete BEFORE DELETE ON stock_shipment_events
+BEGIN SELECT RAISE(ABORT, 'stock_shipment_events rows are immutable'); END;
+
+-- A shipment with its derived status and dispatch details. A delivered event
+-- arriving at any point makes it delivered for good; later events can't undo that.
+CREATE VIEW IF NOT EXISTS stock_shipment_status AS
+SELECT s.id AS shipment_id, s.business_id, s.shipment_number,
+       CASE WHEN EXISTS (SELECT 1 FROM stock_shipment_events e
+                          WHERE e.business_id = s.business_id AND e.shipment_id = s.id AND e.event = 'delivered')
+            THEN 'delivered'
+            WHEN d.shipment_id IS NOT NULL THEN 'dispatched'
+            ELSE 'draft' END AS status,
+       d.carrier, d.label_ref, d.tracking_ref, d.as_of AS dispatched_on
+  FROM stock_shipments s
+  LEFT JOIN stock_shipment_dispatches d ON d.business_id = s.business_id AND d.shipment_id = s.id;
