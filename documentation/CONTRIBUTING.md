@@ -40,6 +40,14 @@ for f in tests/test_*.py; do [ "$f" = tests/test_llm_smoke.py ] || python $f; do
 Get-ChildItem tests\test_*.py | Where Name -ne test_llm_smoke.py | % { python $_.FullName }   # PowerShell
 ```
 
+Or run them all with one command from the repo root (it skips `test_llm_smoke.py` and prints a summary; add a name fragment to run a subset, for example `python scripts/run_tests.py phase_a`):
+
+```
+python scripts/run_tests.py
+```
+
+The same command runs on every pull request in GitHub Actions (`.github/workflows/tests.yml`).
+
 All should pass before you open a PR. Tests use a stub model, so they are free and need no key.
 
 ## Benchmark
