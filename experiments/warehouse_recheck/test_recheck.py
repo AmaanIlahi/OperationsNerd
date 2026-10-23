@@ -14,8 +14,11 @@ exits non-zero if any check fails.
 
 import json
 import os
+import shutil
 import sys
 import tempfile
+
+import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORE = os.path.abspath(os.path.join(HERE, "..", "..", "operations_nerd"))
@@ -36,6 +39,7 @@ from agentic import chat
 from agentic.anthropic_llm import LLMResult
 from agentic.spec import empty_spec
 from agentic.validator import validate_spec
+from packs.loader import load_pack, PackLoadError
 
 if os.path.abspath(d.DB_PATH) != os.path.abspath(TMP_DB):
     sys.exit(f"refusing to run: database is {d.DB_PATH}, not the temporary file")
@@ -205,23 +209,71 @@ def case_7(w: Warehouse):
 
     for item, want in ((x, [o1["id"]]), (y, [o2["id"]])):
         got = orders_containing(item["id"])
-        check("7", f"orders containing {item['display']} = {want}", f"{got}", got == want)
+        check("7 (core)", f"orders containing {item['display']} = {want}", f"{got}", got == want)
 
-    # No API endpoint answers it: the record routes are create/list/get/patch, and
-    # the list ignores a link filter in the query string.
-    record_routes = sorted(f"{method.upper()} {path}" for path, ops in app.openapi()["paths"].items()
-                           if path.startswith("/api/businesses/{business_id}/records") for method in ops)
+    # Through the API it takes two hops: linked-by on the item gives the order lines
+    # that point at it, then each line's own GET gives its Order link.
+    def lines_linking(item_id) -> list[dict]:
+        r = w.c.get(w.url("Item", item_id) + "/linked-by")
+        assert r.status_code == 200, r.text
+        return next(g for g in r.json()["linked_by"] if g["link_key"] == item_link)["records"]
+
+    for item, want in ((x, [o1["id"]]), (y, [o2["id"]])):
+        lines = lines_linking(item["id"])
+        got = sorted({w.links_of("Order line", l["id"])[order_link] for l in lines})
+        check("7 (API)", f"linked-by {item['display']} -> GET each line: orders = {want}",
+              f"{got} in {1 + len(lines)} calls", got == want)
+
+    # Still no one-call answer: linked-by returns lines as id + label only (not their
+    # Order link), and the list ignores a link filter in the query string.
+    shape = sorted(lines_linking(x["id"])[0])
     listed = w.c.get(f"/api/businesses/{w.id}/records/{line_key}", params={item_link: x["id"]}).json()
-    filtered = listed["total"] == 1
-    check("7 (API)", "no endpoint filters records by link (gap still open)",
-          f"{len(record_routes)} record routes; list ?Item=X returned {listed['total']} lines (X is on 1)",
-          len(record_routes) == 4 and not filtered)
+    check("7 (one call)", "no single call: linked-by gives lines not orders; list ignores ?Item=X",
+          f"linked-by record keys {shape}; list ?Item=X returned {listed['total']} lines (X is on 1)",
+          shape == ["id", "label"] and listed["total"] != 1)
 
 
 def case_11a():
     issues = validate_spec({**empty_spec("Depot"), "surprise": True})
     check("11a", "validate_spec rejects unknown top-level key 'surprise'",
           f"{issues}", bool(issues) and any("surprise" in i for i in issues))
+
+
+def case_11b():
+    """Copy the shipped realestate pack, add one unknown key, and load the copy."""
+    src = os.path.join(CORE, "packs", "realestate")
+
+    def load_copy(edit=None) -> str:
+        root = tempfile.mkdtemp(prefix="pack_", dir=os.path.dirname(TMP_DB))
+        pack_dir = os.path.join(root, "realestate")
+        shutil.copytree(src, pack_dir)
+        if edit:
+            edit(pack_dir)
+        try:
+            load_pack("realestate", packs_dir=root)
+            return "loaded"
+        except PackLoadError as e:
+            return "; ".join(e.issues)
+
+    def add_top_level(pack_dir):
+        with open(os.path.join(pack_dir, "pack.yaml"), "a") as f:
+            f.write("\nrecord_types:\n  - name: item\n")
+
+    def add_nested(pack_dir):
+        path = os.path.join(pack_dir, "event_schemas.yaml")
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        data["schemas"][0]["line_items"] = [{"item": "text", "quantity": "number"}]
+        with open(path, "w") as f:
+            yaml.safe_dump(data, f)
+
+    clean = load_copy()
+    top, nested = load_copy(add_top_level), load_copy(add_nested)
+    check("11b (top level)", "unchanged copy loads; + 'record_types' in pack.yaml -> rejected, naming it",
+          f"unchanged: {clean}; with record_types: {top}",
+          clean == "loaded" and "record_types" in top)
+    check("11b (nested)", "+ 'line_items' inside an event schema -> rejected, naming it",
+          nested, nested != "loaded" and "line_items" in nested)
 
 
 def case_s3(w: Warehouse):
@@ -247,6 +299,7 @@ def main() -> int:
     case_8(w)
     case_7(w)
     case_11a()
+    case_11b()
     case_s3(w)
     case_s4(w)
 
