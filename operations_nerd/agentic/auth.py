@@ -100,7 +100,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def prune_expired_sessions(conn) -> int:
+    """Delete every session that has already expired and return how many.
+
+    A session is only removed on its own lookup, so a cookie that is never
+    presented again (a closed browser, a cleared cookie) would stay in the
+    table for good. Sweeping on login keeps the table bounded by live sessions.
+    expires_at is always written as a UTC ISO string, which sorts the same as
+    time, so a plain string comparison is correct here.
+    """
+    cur = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (_now().isoformat(),))
+    return cur.rowcount
+
+
 def create_session(conn, account_id: int) -> str:
+    prune_expired_sessions(conn)
     token = secrets.token_urlsafe(32)
     expires = _now() + timedelta(days=SESSION_DAYS)
     conn.execute(

@@ -188,5 +188,8 @@ CREATE TABLE IF NOT EXISTS chat_usage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_drafted_actions_event ON drafted_actions(event_id);
+CREATE INDEX IF NOT EXISTS idx_events_contact ON events(contact_id);
 CREATE INDEX IF NOT EXISTS idx_spec_versions_business ON spec_versions(business_id, version);
 CREATE INDEX IF NOT EXISTS idx_proposals_business ON proposals(business_id);
