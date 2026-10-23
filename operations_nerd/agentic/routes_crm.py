@@ -113,6 +113,12 @@ def get_record(business_id: int, entity_key: str, record_id: int, request: Reque
     return _run(records.get_record, account["id"], business_id, entity_key, record_id)
 
 
+@router.get("/businesses/{business_id}/records/{entity_key}/{record_id}/linked-by")
+def list_linked_by(business_id: int, entity_key: str, record_id: int, request: Request):
+    account = auth.current_account(request)
+    return _run(records.list_linked_by, account["id"], business_id, entity_key, record_id)
+
+
 @router.patch("/businesses/{business_id}/records/{entity_key}/{record_id}")
 def update_record(business_id: int, entity_key: str, record_id: int, payload: RecordValues,
                   request: Request):

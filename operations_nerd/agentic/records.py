@@ -243,3 +243,36 @@ def list_records(account_id: int, business_id: int, entity_key: str,
         link_views = _link_views(conn, business_id, spec, entity, page)
     return {"total": len(records), "limit": limit, "offset": offset,
             "records": [_view(entity, r, lv) for r, lv in zip(page, link_views)]}
+
+
+def list_linked_by(account_id: int, business_id: int, entity_key: str, record_id: int) -> dict:
+    """Which records link TO this record, grouped by link.
+
+    Link storage is one-directional: the linking (from) record holds the
+    target id under the link key, so a record's own read can never see its
+    backlinks. This is the query a delete flow or an approval card needs:
+    "what points at this record?" Only editable cardinalities can hold
+    stored links today, so only those can have backlinks.
+    """
+    with d.get_conn() as conn:
+        spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
+        _owned_record(conn, business_id, entity_key, record_id)
+        entities = {e["key"]: e for e in spec["entities"]}
+        inbound = [l for l in spec["links"]
+                   if not l["archived"] and l["to"] == entity_key
+                   and l["cardinality"] in EDITABLE_CARDINALITIES]
+        linked_by = []
+        for l in inbound:
+            source = entities[l["from"]]
+            holders = [r for r in d.list_entities(conn, business_id, l["from"])
+                       if r["attributes"].get(l["key"]) == record_id]
+            linked_by.append({
+                "link_key": l["key"],
+                "link_label": l["label"],
+                "cardinality": l["cardinality"],
+                "from_entity": l["from"],
+                "from_entity_label": source["label"],
+                "records": [{"id": r["id"], "label": _display(source, r["attributes"], r["id"])}
+                            for r in holders],
+            })
+        return {"entity": entity_key, "record_id": record_id, "linked_by": linked_by}
