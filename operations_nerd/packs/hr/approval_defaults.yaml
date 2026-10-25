@@ -1,0 +1,7 @@
+defaults:
+  send_leave_decision_reply: true
+  send_onboarding_pack: true
+  send_application_reply: false
+  schedule_interview: true
+  send_hr_info_reply: false
+  escalate_to_hr_manager: true

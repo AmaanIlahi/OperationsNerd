@@ -1,0 +1,10 @@
+schemas:
+  - event_type: inbound_email
+    extract_fields: [intent, employee_ref, candidate_ref, leave_dates, urgency]
+    valid_action_types:
+      - send_leave_decision_reply
+      - send_onboarding_pack
+      - send_application_reply
+      - schedule_interview
+      - send_hr_info_reply
+      - escalate_to_hr_manager

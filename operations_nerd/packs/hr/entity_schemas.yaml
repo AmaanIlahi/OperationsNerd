@@ -1,0 +1,13 @@
+entities:
+  # Employee records and leave balances live in the dedicated HR module (the source
+  # of truth); this pack is only the draft-and-approve workflow layer, so no balance
+  # field is stored here.
+  - entity_type: crm_employee
+    label: Employee
+    fields: [first_name, last_name, email, role, department, manager, start_date]
+    required: [first_name]
+
+  - entity_type: crm_candidate
+    label: Candidate
+    fields: [name, email, phone, role_applied, stage, resume_ref]
+    required: [name]
