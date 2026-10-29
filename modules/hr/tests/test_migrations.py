@@ -225,6 +225,51 @@ def test_upgrading_to_3_rebuilds_the_event_table_and_keeps_every_row_and_rule():
     assert h.rehire_employee(conn, 2, "2026-01-05", "back")["status"] == "active"
 
 
+IMPOSSIBLE_DATES = ("2026-02-30", "2026-04-31", "2025-02-29")
+REAL_DATES = ("2024-02-29", "2026-01-31", "2026-12-31", "2026-02-28", "2026-04-30")
+
+
+def date_checks() -> list[tuple[str, str, str]]:
+    """(file, column, expression) for every `CHECK (col IS date(col) ...)` in migrations/."""
+    import re
+    out = []
+    for path in sorted(Path(h.MIGRATIONS).glob("*.sql")):
+        sql = path.read_text()
+        for check in re.finditer(r"CHECK\s*\(", sql):
+            depth, j = 1, check.end()
+            while depth:
+                depth += {"(": 1, ")": -1}.get(sql[j], 0)
+                j += 1
+            expr = sql[check.end():j - 1]
+            col = re.match(r"\s*(\w+) IS date\(\1\)", expr)
+            if col:
+                out.append((path.name, col.group(1), expr))
+    return out
+
+
+def test_every_date_check_refuses_impossible_days_whatever_the_sqlite_version():
+    """`x IS date(x)` alone lets SQLite < 3.45 store 2026-02-30; each date CHECK also compares the day with the
+    month's last day. The guard is evaluated on its own too, so this holds on a SQLite whose date() is lenient."""
+    import re
+    checks = date_checks()
+    assert sorted(c for _, c, _ in checks) == sorted(["start_date", "end_date", "effective_date", "start_date",
+                                                     "end_date", "as_of", "effective_date"]), checks
+    conn = sqlite3.connect(":memory:")
+    for name, col, expr in checks:
+        assert " AND substr(" in expr, (name, col, "date CHECK without the day-of-month guard")
+        guard = expr.split(" AND ", 1)[1]
+        full, day_only = (re.sub(rf"\b{col}\b", ":d", e) for e in (expr, guard))
+        for d in IMPOSSIBLE_DATES:
+            assert conn.execute(f"SELECT {full}", {"d": d}).fetchone()[0] == 0, (name, col, d)
+            assert conn.execute(f"SELECT {day_only}", {"d": d}).fetchone()[0] == 0, (name, col, d)
+        for d in REAL_DATES:
+            assert conn.execute(f"SELECT {full}", {"d": d}).fetchone()[0] == 1, (name, col, d)
+        # NULL: the CHECK is NULL (passes), as it was with `x IS date(x)` alone; NOT NULL columns refuse it anyway.
+        assert conn.execute(f"SELECT {full}", {"d": None}).fetchone()[0] in (None, 1), (name, col)
+        for d in ("2026-1-05", "2026-01-05 10:00", "05/01/2026", "", "2026-13-01"):
+            assert conn.execute(f"SELECT {full}", {"d": d}).fetchone()[0] == 0, (name, col, d)
+
+
 def test_an_in_memory_database_migrates_without_a_backup():
     conn = h.connect(":memory:")
     assert h.init_db(conn)["backup"] is None and h.schema_version(conn) == LATEST

@@ -410,6 +410,26 @@ def test_a_raw_request_without_its_request_entry_cannot_be_decided():
     rejected(lambda: raw_ledger(conn, 2, 1, "cancel", 0, "x2", request_id=rid), "not in a state for this step")
 
 
+def test_raw_impossible_days_are_refused_and_real_month_ends_accepted():
+    """Raw SQL: 2026-02-30, 2026-04-31 and 2025-02-29 are refused in every leave date column (on any SQLite
+    version: older ones' date() lets them through, the day-of-month guard doesn't), real month ends are kept."""
+    conn, _ = shop("raw_impossible_days")
+    h.accrue_annual_leave(conn, 2, "annual", YEAR, "acc")
+    ledger = """INSERT INTO hr_leave_ledger (employee_id, leave_type_id, entry_type, half_days, reason, as_of,
+                                             idempotency_key) VALUES (2, 1, 'adjustment', 1, 'x', ?, ?)"""
+    for bad in ("2026-02-30", "2026-04-31", "2025-02-29"):
+        rejected(lambda: raw_request(conn, 1, 2, bad, "2026-12-31", 2, "r"),
+                 "CHECK constraint failed: start_date IS date(start_date)")
+        rejected(lambda: raw_request(conn, 1, 2, "2025-01-06", bad, 2, "r"),
+                 "CHECK constraint failed: end_date IS date(end_date)")
+        rejected(lambda: conn.execute(ledger, (bad, "r")), "CHECK constraint failed: as_of IS date(as_of)")
+    for i, good in enumerate(("2024-02-29", "2026-01-31", "2026-12-31")):
+        conn.execute(ledger, (good, f"ok{i}"))
+    assert [r[0] for r in conn.execute("SELECT as_of FROM hr_leave_ledger WHERE idempotency_key LIKE 'ok%' "
+                                        "ORDER BY id")] == ["2024-02-29", "2026-01-31", "2026-12-31"]
+    conn.execute(ledger, (None, "ok_null"))                                    # as_of stays optional
+
+
 def test_raw_every_column_rule_on_leave_tables():
     """Raw: each bad value in a leave type, request or ledger row is refused by its own CHECK or trigger."""
     conn, _ = shop("raw_leave_columns")

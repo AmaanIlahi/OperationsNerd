@@ -8,6 +8,13 @@
 -- its own triggers refuse any insert or update that doesn't match the event
 -- for that version. So the current row and the history can't drift apart.
 -- No pay, tax, bank or other sensitive personal fields (see README).
+--
+-- Every date column is checked with `x IS date(x)` plus a day-of-month guard:
+-- `substr(x, 9, 2) <= substr(date(substr(x, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)`.
+-- `date()` alone accepts impossible days (2026-02-30, 2026-04-31, 2025-02-29) on
+-- SQLite before 3.45 (3.37 and 3.40 were checked); the guard compares the day with
+-- the last day of that month, so the rule is the same on every version. A NULL
+-- stays allowed where it was: the CHECK is NULL, not false.
 
 -- Command names known to the idempotency log. Each migration adds its own, so
 -- a later migration never has to rebuild hr_commands to widen a CHECK.
@@ -49,9 +56,9 @@ CREATE TABLE hr_employees (
     employment_type    TEXT    NOT NULL CHECK (employment_type IN ('full_time', 'part_time', 'contractor',
                                                                    'temporary', 'intern')),
     work_location      TEXT    CHECK (work_location <> ''),
-    start_date         TEXT    NOT NULL CHECK (start_date IS date(start_date)),
+    start_date         TEXT    NOT NULL CHECK (start_date IS date(start_date) AND substr(start_date, 9, 2) <= substr(date(substr(start_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
     status             TEXT    NOT NULL CHECK (status IN ('active', 'terminated')),
-    end_date           TEXT    CHECK (end_date IS date(end_date)),
+    end_date           TEXT    CHECK (end_date IS date(end_date) AND substr(end_date, 9, 2) <= substr(date(substr(end_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
     termination_reason TEXT    CHECK (termination_reason <> ''),
     version            INTEGER NOT NULL CHECK (version >= 1),
     idempotency_key    TEXT    NOT NULL CHECK (idempotency_key <> ''),
@@ -71,7 +78,7 @@ CREATE TABLE hr_employment_events (
     employee_id     INTEGER NOT NULL,
     version         INTEGER NOT NULL CHECK (version >= 1),
     event           TEXT    NOT NULL CHECK (event IN ('hired', 'updated', 'terminated')),
-    effective_date  TEXT    NOT NULL CHECK (effective_date IS date(effective_date)),
+    effective_date  TEXT    NOT NULL CHECK (effective_date IS date(effective_date) AND substr(effective_date, 9, 2) <= substr(date(substr(effective_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
     changes         TEXT    NOT NULL CHECK (json_valid(changes) AND json_type(changes) = 'object'),
     snapshot        TEXT    NOT NULL CHECK (json_valid(snapshot) AND json_type(snapshot) = 'object'),
     reason          TEXT    CHECK (reason <> ''),

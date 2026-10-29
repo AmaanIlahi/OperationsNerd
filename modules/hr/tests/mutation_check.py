@@ -55,7 +55,6 @@ EXPECTED_REDUNDANT = {
 # Shadowed: another rule always fires first with the message the tests expect, so no test can tell these
 # are gone. Each is a second line of defence behind the rule named.
 EXPECTED_SHADOWED = {
-    "check hr_employees: (end_date IS date(end_date)",                         # event end_date = effective_date
     "check hr_leave_requests: (status IN ('pending', 'approved', 'rejected', 'cancelled')",  # born_pending, ledger
     "trigger hr_leave_requests_status_flow",                                   # status_matches_ledger
     "check hr_leave_ledger: (entry_type NOT IN ('request', 'reject') OR half_days = 0",     # request_amount

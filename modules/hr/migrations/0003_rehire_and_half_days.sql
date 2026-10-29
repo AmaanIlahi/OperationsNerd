@@ -29,7 +29,7 @@ CREATE TABLE hr_employment_events_v3 (
     employee_id     INTEGER NOT NULL,
     version         INTEGER NOT NULL CHECK (version >= 1),
     event           TEXT    NOT NULL CHECK (event IN ('hired', 'updated', 'terminated', 'rehired')),
-    effective_date  TEXT    NOT NULL CHECK (effective_date IS date(effective_date)),
+    effective_date  TEXT    NOT NULL CHECK (effective_date IS date(effective_date) AND substr(effective_date, 9, 2) <= substr(date(substr(effective_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
     changes         TEXT    NOT NULL CHECK (json_valid(changes) AND json_type(changes) = 'object'),
     snapshot        TEXT    NOT NULL CHECK (json_valid(snapshot) AND json_type(snapshot) = 'object'),
     reason          TEXT    CHECK (reason <> ''),

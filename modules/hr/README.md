@@ -5,6 +5,11 @@ append-only ledger. Built in the same way as the logistics stock engine
 (`modules/logistics/`, on `jasmeet/logistics-stock`). It uses stdlib `sqlite3`
 only, imports nothing from `operations_nerd/` and makes no LLM calls.
 
+No minimum SQLite version is needed. `date()` before SQLite 3.45 lets
+impossible days such as 2026-02-30 through (3.37 and 3.40 were checked), so each
+date CHECK also compares the day with the last day of its month; the rules are
+the same on every version.
+
 ```
 modules/hr/
   hr.py                  commands and queries (the API other code calls)
@@ -302,8 +307,8 @@ python -B modules/hr/tests/mutation_check.py   # ~1 min, not run by CI
 | script | tests | covers |
 |---|---|---|
 | `test_employees.py` | 17 | hiring, required/invalid fields, no sensitive fields, unique number/email, managers and loops, update diffs, termination and report reassignment, idempotent replay/conflict/failed key, 8 concurrent hires, raw SQL against every employee/event rule |
-| `test_leave.py` | 22 | leave types and allowance policy, accrual + proration, adjustments, working days and half days, approve/reject/cancel with credit-back, balance enforcement with pending holds, untracked types, overlaps across types, racing requests, termination effects, idempotency, ledger immutability, raw SQL against every leave rule, deletes on a connection with foreign keys off, amounts/ids too big for SQLite, termination's derived keys never colliding |
-| `test_migrations.py` | 11 | fresh, rerun, stepwise upgrade with backup holding the old data, failing migration rolls back (keeping earlier versions of the same run), numbering rules, newer database refused, sharing a database with another module's tables, concurrent migrators taking one backup, upgrading a v2 database to 3 keeps every row and rule, in-memory |
+| `test_leave.py` | 23 | leave types and allowance policy, accrual + proration, adjustments, working days and half days, approve/reject/cancel with credit-back, balance enforcement with pending holds, untracked types, overlaps across types, racing requests, termination effects, idempotency, ledger immutability, raw SQL against every leave rule, impossible days (2026-02-30) refused in every leave date column, deletes on a connection with foreign keys off, amounts/ids too big for SQLite, termination's derived keys never colliding |
+| `test_migrations.py` | 12 | fresh, rerun, stepwise upgrade with backup holding the old data, failing migration rolls back (keeping earlier versions of the same run), numbering rules, newer database refused, sharing a database with another module's tables, concurrent migrators taking one backup, upgrading a v2 database to 3 keeps every row and rule, every date CHECK refuses impossible days on any SQLite version, in-memory |
 | `test_hardening.py` | 19 | the cancel clock, termination with spanning leave (charged to the end date) and nothing written after it, rehire (same record, rules, old-employment leave), trimmed/normalised identity fields, length limits on every text input, event dates in order, huge or odd ids, am/pm halves, the startup schema check; raw SQL against each new rule |
 | `test_api.py` | 14 | every endpoint, no sensitive fields in request bodies, 409/422/404/503 mapping, Idempotency-Key required and replayed, `main.py` mounts `/hr` only when enabled, too-big numbers, strict JSON types (no `"2"`→2 or `true`→1 coercion), empty decision bodies, a vanished database is a 503 and recovers, a tampered schema is a 503, rehire and half endpoints, length limits on bodies, header, query and path |
 | `test_toy_shop_walkthrough.py` | 2 | the demo end to end, and replaying it writes nothing |
@@ -314,8 +319,8 @@ rejected is rejected by the database itself.
 `mutation_check.py` removes each database rule in turn (every trigger, unique
 index and CHECK, where a current database gets it from) plus 20 pieces of
 command logic, from a temp copy, and reruns the tests. Result: 121 removals,
-102 caught, 10 redundant (implied by other rules; still rejected, with another
-message), 9 shadowed (another rule always fires first, so no test can tell). Both lists are pinned in the script
+103 caught, 10 redundant (implied by other rules; still rejected, with another
+message), 8 shadowed (another rule always fires first, so no test can tell). Both lists are pinned in the script
 with the rule that covers each.
 
 ## Walkthrough

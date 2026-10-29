@@ -73,8 +73,8 @@ CREATE TABLE hr_leave_requests (
     id              INTEGER PRIMARY KEY,
     employee_id     INTEGER NOT NULL REFERENCES hr_employees (id),
     leave_type_id   INTEGER NOT NULL REFERENCES hr_leave_types (id),
-    start_date      TEXT    NOT NULL CHECK (start_date IS date(start_date)),
-    end_date        TEXT    NOT NULL CHECK (end_date IS date(end_date)),
+    start_date      TEXT    NOT NULL CHECK (start_date IS date(start_date) AND substr(start_date, 9, 2) <= substr(date(substr(start_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
+    end_date        TEXT    NOT NULL CHECK (end_date IS date(end_date) AND substr(end_date, 9, 2) <= substr(date(substr(end_date, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),
     half_days       INTEGER NOT NULL CHECK (half_days > 0),
     note            TEXT    CHECK (note <> ''),
     status          TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
@@ -149,7 +149,7 @@ CREATE TABLE hr_leave_ledger (
     half_days       INTEGER NOT NULL,
     request_id      INTEGER REFERENCES hr_leave_requests (id),
     accrual_year    INTEGER CHECK (accrual_year BETWEEN 1900 AND 9999),
-    as_of           TEXT    CHECK (as_of IS date(as_of)),       -- the business date of the entry, when given
+    as_of           TEXT    CHECK (as_of IS date(as_of) AND substr(as_of, 9, 2) <= substr(date(substr(as_of, 1, 8) || '01', '+1 month', '-1 day'), 9, 2)),       -- the business date of the entry, when given
     actor           TEXT    CHECK (actor <> ''),                -- who decided, for approve / reject / cancel
     reason          TEXT    CHECK (reason <> ''),
     idempotency_key TEXT    NOT NULL CHECK (idempotency_key <> ''),
