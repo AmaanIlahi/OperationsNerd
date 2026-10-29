@@ -51,6 +51,18 @@ if os.environ.get("CONFIG_AGENT_ENABLED") == "1":
     app.include_router(config_agent_router)
     app.mount("/agent", StaticFiles(directory="frontend_agent", html=True), name="agent")
 
+# HR module API (modules/hr/): employee records and leave, on the SQLite file in
+# HR_DATABASE_PATH. It has no login or per-business database routing yet, so it
+# is a local development surface only: mounted when HR_MODULE_ENABLED=1, never
+# when APP_ENV=production.
+if os.environ.get("HR_MODULE_ENABLED") == "1" and not agentic_config.is_production():
+    import importlib.util
+    _hr_api_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "modules", "hr", "api.py")
+    _hr_spec = importlib.util.spec_from_file_location("hr_module_api", _hr_api_path)
+    _hr_api = importlib.util.module_from_spec(_hr_spec)
+    _hr_spec.loader.exec_module(_hr_api)
+    app.include_router(_hr_api.router)
+
 
 # Production serves only /app, /api/* and /healthz. The legacy demo routes
 # (questionnaire, state, pipeline, approval, /ui, /agent) have no auth and are

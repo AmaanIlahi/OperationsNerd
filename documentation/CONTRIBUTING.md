@@ -46,6 +46,9 @@ Or run them all with one command from the repo root (it skips `test_llm_smoke.py
 python scripts/run_tests.py
 ```
 
+It also runs each standalone module's tests (`modules/<name>/tests/test_*.py`) from the repo root; a path
+fragment selects one module, for example `python scripts/run_tests.py modules/hr`.
+
 The same command runs on every pull request in GitHub Actions (`.github/workflows/tests.yml`).
 
 All should pass before you open a PR. Tests use a stub model, so they are free and need no key.
@@ -80,4 +83,7 @@ Output goes to `scripts/benchmark/results/<timestamp>/report.md`. Live full runs
 
 - **Logistics rules:** `modules/logistics/`, as standalone code with its own tests. No imports from the core yet;
   the module interface is not built. Keep rules generic to logistics, never per company.
+- **HR (employee records and leave):** `modules/hr/`, standalone like logistics, with versioned migrations in
+  `modules/hr/migrations/`. No payroll or other sensitive fields until encryption and access control exist
+  (see `modules/hr/README.md`).
 - **Core data integrity:** the db layer, `operations_nerd/db/`, with tests in `operations_nerd/tests/`.
