@@ -13,6 +13,8 @@ submits the questionnaire. Different inputs, different lifetimes, same
 philosophy: fail loudly, name the exact problem, never guess.
 """
 
+import math
+
 from packs.loader import Pack, Question
 
 
@@ -43,6 +45,10 @@ def _validate_one(question: Question, value) -> list[str]:
         # bool is technically a subclass of int in Python, exclude it explicitly
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             issues.append(f"{question.id}: expected a number, got {type(value).__name__}")
+        elif not math.isfinite(value):
+            # Python's JSON parser accepts NaN and Infinity. They are not valid
+            # JSON, so storing them breaks settings_json and the response.
+            issues.append(f"{question.id}: expected a finite number, got {value}")
 
     elif question.type == "boolean":
         if not isinstance(value, bool):
