@@ -18,7 +18,7 @@ def run():
             ids = [d.create_entity(c, a, 'crm_person', v) for v in [
                 {'name': 'Straße', 'status': 'open', 'number': 1},
                 {'name': '１００%_Ready', 'status': 'closed', 'number': True},
-                {'name': 'Ravi', 'tags': ['Gold', 'Blue'], 'none': None},
+                {'name': 'Ravi', 'tags': ['Gold', 'Blue'], 'none': None, 'nested': [True]},
                 {'name': 'Another', 'status': 'open', 'hidden': 'Ravi'}]]
             d.create_entity(c, a, 'crm_supplier', {'name': 'Ravi'})
             d.create_entity(c, b, 'crm_person', {'name': 'Ravi', 'status': 'secret'})
@@ -37,6 +37,8 @@ def run():
             assert search(equals={'number': 1})['total'] == 1
             assert search(equals={'number': True})['records'][0]['id'] == ids[1]
             assert search(equals={'none': None})['total'] == 1
+            assert search(equals={'nested': [1]})['total'] == 0
+            assert search(equals={'nested': [True]})['total'] == 1
             assert search(offset=99)['records'] == []
             assert d.search_owned_entities(c, b, 'owner', 'crm_person') is None
             assert d.search_owned_entities(c, 99999, 'owner', 'crm_person') is None
@@ -50,7 +52,7 @@ def run():
                     raise AssertionError(f'Accepted {bad}')
                 except ValueError:
                     pass
-    print('entity search: 23 assertions/invalid-input cases passed')
+    print('entity search: 25 assertions/invalid-input cases passed')
 
 if __name__ == '__main__':
     run()

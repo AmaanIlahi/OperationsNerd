@@ -538,7 +538,8 @@ def search_owned_entities(conn, business_id: int, owner_key: str, entity_type: s
     matches = []
     for row in list_entities(conn, business_id, entity_type):
         attrs = row['attributes']
-        if any(k not in attrs or type(attrs[k]) is not type(v) or attrs[k] != v
+        if any(k not in attrs or json.dumps(attrs[k], sort_keys=True, allow_nan=False)
+               != json.dumps(v, sort_keys=True, allow_nan=False)
                for k, v in (equals or {}).items()):
             continue
         values = [v for k, v in attrs.items() if fields is None or k in fields]
