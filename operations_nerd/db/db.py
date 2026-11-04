@@ -498,3 +498,52 @@ def update_entity_attributes(conn, entity_id: int, owner_key: str, attributes: d
 if __name__ == "__main__":
     init_db(reset=True)
     print(f"Initialized fresh database at {DB_PATH}")
+
+
+def search_owned_entities(conn, business_id: int, owner_key: str, entity_type: str,
+                          *, query: str = '', fields: list[str] | None = None,
+                          equals: dict | None = None, limit: int = 100,
+                          offset: int = 0) -> dict | None:
+    """Read-only EAV search, scoped to one owned business and entity type.
+
+    `query` is literal Unicode case-insensitive text (not SQL LIKE syntax).
+    `fields` restricts text search to a caller's active/display fields. Exact
+    filters are ANDed, preserve JSON types, and distinguish missing from null.
+    Filtering precedes pagination; total counts matches, not the entire table.
+    Returns None for an unowned/missing business, never its existence or count.
+    No schema/agentic changes: callers remain responsible for spec validation.
+    """
+    import unicodedata
+    if not conn.execute('SELECT 1 FROM businesses WHERE id=? AND owner_key=?',
+                        (business_id, owner_key)).fetchone():
+        return None
+    if not isinstance(entity_type, str) or not entity_type:
+        raise ValueError('entity_type must be nonempty text')
+    if not isinstance(query, str) or len(query) > 200:
+        raise ValueError('query must be text of at most 200 characters')
+    if (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500
+            or isinstance(offset, bool) or not isinstance(offset, int) or offset < 0):
+        raise ValueError('limit must be 1..500 and offset a nonnegative integer')
+    if fields is not None and (not isinstance(fields, list) or any(not isinstance(f, str) for f in fields)):
+        raise ValueError('fields must be a list of field keys')
+    if equals is not None and (not isinstance(equals, dict) or any(not isinstance(k, str) for k in equals)):
+        raise ValueError('equals must be a field-key mapping')
+    needle = unicodedata.normalize('NFKC', query).casefold().strip()
+    def searchable(value):
+        if value is None or isinstance(value, dict):
+            return []
+        if isinstance(value, list):
+            return [text for v in value for text in searchable(v)]
+        return [unicodedata.normalize('NFKC', str(value)).casefold()]
+    matches = []
+    for row in list_entities(conn, business_id, entity_type):
+        attrs = row['attributes']
+        if any(k not in attrs or type(attrs[k]) is not type(v) or attrs[k] != v
+               for k, v in (equals or {}).items()):
+            continue
+        values = [v for k, v in attrs.items() if fields is None or k in fields]
+        if needle and not any(needle in text for v in values for text in searchable(v)):
+            continue
+        matches.append(row)
+    return {'total': len(matches), 'limit': limit, 'offset': offset,
+            'records': matches[offset:offset + limit]}
