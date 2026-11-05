@@ -90,7 +90,7 @@ def a_bill(s, key="bill", number="DR-1", cents=27_000, **extra):
 
 def test_account_endpoints():
     s = seeded("accounts")
-    assert s.get("/accounting/schema") == {"module": "accounting", "version": 2}
+    assert s.get("/accounting/schema") == {"module": "accounting", "version": 3}
     assert [x["code"] for x in s.get("/accounting/accounts")] == [c[0] for c in CHART]
     assert [x["code"] for x in s.get("/accounting/accounts?account_type=income")] == ["4000"]
     bank = s.get("/accounting/accounts/1")
@@ -443,7 +443,7 @@ def test_main_mounts_the_router_and_the_ui_only_when_enabled():
     for path in ("/accounting/accounts", "/accounting/journal", "/accounting/invoices/{invoice_id}/send",
                  "/accounting/bills/{bill_id}/payments", "/accounting/reports/trial-balance"):
         assert path in on["paths"], path
-    assert on["schema"] == {"module": "accounting", "version": 2} and on["ui"] == 200
+    assert on["schema"] == {"module": "accounting", "version": 3} and on["ui"] == 200
     off = _routes_of_main("0")
     assert off["paths"] == [] and off["ui"] == 404
 

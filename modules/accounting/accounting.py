@@ -399,6 +399,9 @@ def reverse_journal_entry(conn, entry_id: int, idempotency_key: str, entry_date:
 
     entry_date defaults to the original entry's date, memo to 'Reversal of entry N: <its memo>'. An
     entry is reversed at most once (InvalidState); correct a reversal by reversing the reversal.
+    Only a manual or payroll entry: an invoice or a bill is reversed by voiding it, and a payment
+    entry is not reversed (there is no refund in v1). Reversing one of those on its own would take
+    the figure out of the journal and leave the document still saying the money is there.
     """
     _positive_int("entry_id", entry_id)
     if entry_date is not None:
@@ -501,10 +504,11 @@ def record_invoice_payment(conn, invoice_id: int, amount_cents: int, payment_dat
     """Records money received against a sent invoice. Returns invoice().
 
     Posts one entry dated payment_date: debit the account the money arrived in (an active asset
-    account that isn't receivables), credit accounts_receivable. Part payments are fine and leave
-    the invoice 'sent' with a smaller outstanding amount; the payment that clears the last cent
-    moves it to 'paid'. More than the outstanding amount is refused (InvalidState): there is no
-    credit note or refund in v1.
+    account that isn't receivables), credit accounts_receivable. payment_date can't be before the
+    invoice's own entry date, so the receipt is never in the books on a day the invoice is not.
+    Part payments are fine and leave the invoice 'sent' with a smaller outstanding amount; the
+    payment that clears the last cent moves it to 'paid'. More than the outstanding amount is
+    refused (InvalidState): there is no credit note or refund in v1.
     """
     return _record_payment(conn, "invoice", invoice_id, amount_cents, payment_date, deposit_account_id,
                            idempotency_key, reference)
@@ -514,8 +518,10 @@ def void_invoice(conn, invoice_id: int, reason: str, idempotency_key: str, entry
     """Voids a draft invoice, or a sent one that nothing has been paid against. Returns invoice().
 
     A sent invoice's entry is reversed (dated entry_date, the original entry's date by default), so the
-    books end up where they were. An invoice with a payment against it is not voided (InvalidState):
-    that would hide money that really arrived. Nothing is deleted and the void is not undone.
+    books end up where they were. entry_date can't be before that entry's date: a void that landed
+    first would credit receivables on a day the invoice had not been posted. An invoice with a
+    payment against it is not voided (InvalidState): that would hide money that really arrived.
+    Nothing is deleted and the void is not undone.
     """
     return _void_document(conn, "invoice", invoice_id, reason, idempotency_key, entry_date)
 
@@ -578,8 +584,8 @@ def record_bill_payment(conn, bill_id: int, amount_cents: int, payment_date: str
     """Records money paid against a received bill. Returns bill().
 
     Posts one entry dated payment_date: debit accounts_payable, credit the account the money left from
-    (an active asset account that isn't receivables). Part payments are fine; more than the outstanding
-    amount is refused.
+    (an active asset account that isn't receivables). payment_date can't be before the bill's own
+    entry date. Part payments are fine; more than the outstanding amount is refused.
     """
     return _record_payment(conn, "bill", bill_id, amount_cents, payment_date, paid_from_account_id,
                            idempotency_key, reference)
@@ -879,7 +885,10 @@ def _post_document(conn, kind, document_id, idempotency_key, entry_date):
         side = k["control_side"]
         other = "credit" if side == "debit" else "debit"
         entry_lines = [_entry_line(control["id"], side, row["total_cents"])]
-        entry_lines += [_entry_line(s["account_id"], other, s["amount"]) for s in shares]
+        # A waived line (a zero price on its own account) stays on the document but is not a journal
+        # line: both of a line's amounts would be 0, which the journal refuses. It adds nothing to the
+        # total, so leaving it out keeps the entry balanced.
+        entry_lines += [_entry_line(s["account_id"], other, s["amount"]) for s in shares if s["amount"]]
         entry_id = _insert_entry(conn, dated, memo, k["source"], row[k["number"]],
                                  [_resolve_line(conn, line) for line in entry_lines], idempotency_key)
         conn.execute(f"UPDATE {k['table']} SET entry_id = ?, status = 'sent' WHERE id = ?",
@@ -905,6 +914,10 @@ def _record_payment(conn, kind, document_id, amount_cents, payment_date, money_a
         if row["status"] != "sent":
             raise InvalidState(f"{kind} {document_id} is {row['status']}: a {k['payment_word']} is recorded "
                                f"against a {kind} that is in the books and not yet settled")
+        posted_on = conn.execute("SELECT entry_date FROM acct_journal_entries WHERE id = ?",
+                                 (row["entry_id"],)).fetchone()["entry_date"]
+        if payment_date < posted_on:
+            raise ValueError(f"payment_date {payment_date} is before the entry date {posted_on}")
         outstanding = row["total_cents"] - row["amount_paid_cents"]
         if amount_cents > outstanding:
             raise InvalidState(f"{kind} {document_id} has {outstanding} cents outstanding, "
@@ -957,8 +970,13 @@ def _void_document(conn, kind, document_id, reason, idempotency_key, entry_date)
             # A draft was never in the books, so there is nothing to reverse.
             conn.execute(f"UPDATE {k['table']} SET status = 'void' WHERE id = ?", (document_id,))
         else:
+            posted_on = conn.execute("SELECT entry_date FROM acct_journal_entries WHERE id = ?",
+                                     (row["entry_id"],)).fetchone()["entry_date"]
+            if entry_date is not None and entry_date < posted_on:
+                raise ValueError(f"entry_date {entry_date} is before the entry date {posted_on}")
             memo = f"Void of {kind} {row[k['number']]}: {reason}"
-            reversal = _insert_reversal(conn, row["entry_id"], idempotency_key, entry_date, memo)
+            reversal = _insert_reversal(conn, row["entry_id"], idempotency_key, entry_date, memo,
+                                        from_document=True)
             conn.execute(f"UPDATE {k['table']} SET status = 'void', void_entry_id = ? WHERE id = ?",
                          (reversal, document_id))
         return _document(conn, kind, document_id)
@@ -1122,11 +1140,18 @@ def _insert_entry(conn, entry_date, memo, source, source_ref, lines, idempotency
     return entry_id
 
 
-def _insert_reversal(conn, entry_id, idempotency_key, entry_date=None, memo=None) -> int:
-    """The mirror image of an entry: the same lines in the same order with debits and credits swapped."""
+def _insert_reversal(conn, entry_id, idempotency_key, entry_date=None, memo=None, *, from_document=False) -> int:
+    """The mirror image of an entry: the same lines in the same order with debits and credits swapped.
+
+    from_document is set only by voiding an invoice or a bill, which is what reverses those entries.
+    reverse_journal_entry leaves it false, so a document or payment entry can't be reversed on its own.
+    """
     original = conn.execute("SELECT * FROM acct_journal_entries WHERE id = ?", (entry_id,)).fetchone()
     if original is None:
         raise NotFound(f"no journal entry {entry_id}")
+    if not from_document and original["source"] not in MANUAL_SOURCES:
+        raise InvalidState(f"entry {entry_id} was posted by {original['source']}; "
+                           f"only a manual or payroll entry can be reversed here")
     already = conn.execute("SELECT id FROM acct_journal_entries WHERE reverses_id = ?", (entry_id,)).fetchone()
     if already:
         raise InvalidState(f"entry {entry_id} was already reversed by entry {already['id']}; "
