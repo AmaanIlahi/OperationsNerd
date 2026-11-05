@@ -95,6 +95,9 @@
   .spec-entity { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
   .spec-entity.archived { opacity: .6; }
   .confirm { border: 1px solid var(--danger); border-radius: 8px; padding: 9px 11px; margin: 8px 0; }
+  .record-search { display: grid; gap: 8px; margin: 8px 0 14px; }
+  .record-search label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .record-search button { justify-self: start; }
 </style>
 </head>
 <body>
@@ -185,6 +188,8 @@ const S = {
   biz: null,            // current business incl. spec
   tab: null,            // selected entity key
   view: 'crm',          // 'crm' | 'history'
+  search: { q: "", key: "", value: "" },
+  recordRequest: 0,
   recs: null,           // {entity, items, total, error}
   form: null,           // {mode, record}
   chats: {},            // business id -> {messages: [{role, content, proposal}], busy, error}
@@ -350,6 +355,7 @@ async function selectBusiness(id) {
     S.biz = null; fill(shell.left, el('div', { class: 'error', text: e.message })); return;
   }
   remember('biz-' + S.account.id, String(id));
+  S.search = { q: "", key: "", value: "" };
   S.tab = null; S.recs = null; S.form = null; S.history = null; S.view = 'crm';
   renderHeader();
   await loadChatHistory();
@@ -374,7 +380,7 @@ async function renderCrm() {
 
   const tabs = el('div', { class: 'tabs' }, ents.map(e =>
     el('button', { class: 'tab' + (e.key === S.tab ? ' active' : ''), text: e.label,
-      onclick: () => { S.tab = e.key; S.form = null; S.recs = null; renderCrm(); } })));
+      onclick: () => { S.search = { q: "", key: "", value: "" }; S.tab = e.key; S.form = null; S.recs = null; renderCrm(); } })));
 
   if (!ents.length) {
     fill(shell.left, el('h2', { text: S.biz.name }),
@@ -390,13 +396,52 @@ async function renderCrm() {
 async function loadRecords(append) {
   const ent = currentEntity();
   const offset = append && S.recs ? S.recs.items.length : 0;
+  const requestId = ++S.recordRequest;
+  const businessId = S.biz.id;
+  const params = new URLSearchParams({ limit: '100', offset: String(offset), q: S.search.q });
+  if (S.search.key) params.set('equals', JSON.stringify({ [S.search.key]: S.search.value }));
   try {
-    const page = await api('GET', `/businesses/${S.biz.id}/records/${ent.key}?limit=100&offset=${offset}`);
+    const page = await api('GET', `/businesses/${businessId}/records/${ent.key}?${params}`);
+    if (requestId !== S.recordRequest || S.biz.id !== businessId || S.tab !== ent.key) return;
     S.recs = { entity: ent.key, items: (append && S.recs ? S.recs.items : []).concat(page.records), total: page.total, error: null };
   } catch (e) {
+    if (requestId !== S.recordRequest || S.biz.id !== businessId || S.tab !== ent.key) return;
     S.recs = { entity: ent.key, items: [], total: 0, error: e };
     if (e.status === 409) { await refreshBusiness(); }
   }
+}
+
+function recordSearch(body, ent) {
+  const q = el('input', { type: 'search', value: S.search.q, maxLength: 200,
+    'aria-label': 'Search records', placeholder: 'Search active field values' });
+  const fields = activeFields(ent).filter(f => ['select', 'boolean'].includes(f.type));
+  const key = el('select', { 'aria-label': 'Filter field' },
+    el('option', { value: '', text: 'All records' }), fields.map(f => el('option', { value: f.key, text: f.label })));
+  key.value = S.search.key;
+  const value = el('select', { 'aria-label': 'Filter value' });
+  function options() {
+    const f = fields.find(f => f.key === key.value);
+    fill(value, ...(f ? (f.type === 'boolean' ? [['true', 'Yes'], ['false', 'No']] : f.options.map(v => [v,v])) : [])
+      .map(([v,t]) => el('option', { value: v, text: t })));
+    value.disabled = !f;
+    if (!f) fill(value, el('option', { value: '', text: 'Choose a filter field' }));
+  }
+  options();
+  if (S.search.key) value.value = String(S.search.value);
+  key.addEventListener('change', options);
+  const form = el('form', { class: 'record-search', 'aria-label': 'Search and filter records' },
+    el('label', null, 'Search active fields', q), el('label', null, 'Filter field', key), el('label', null, 'Filter value', value),
+    el('button', { type: 'submit', text: 'Search' }),
+    el('button', { type: 'button', text: 'Clear', onclick: async () => {
+      S.search = { q: '', key: '', value: '' }; S.form = null; await loadRecords(); drawRecords(body);
+    } }));
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const f = fields.find(f => f.key === key.value);
+    S.search = { q: q.value.trim(), key: key.value, value: f && f.type === 'boolean' ? value.value === 'true' : value.value };
+    S.form = null; await loadRecords(); drawRecords(body);
+  });
+  return form;
 }
 
 function drawRecords(body) {
@@ -427,6 +472,7 @@ function drawRecords(body) {
   });
 
   fill(body,
+    recordSearch(body, ent),
     el('div', { class: 'row' },
       el('button', { class: 'primary', text: 'New ' + ent.label, onclick: () => { S.form = { mode: 'create' }; drawRecords(body); } }),
       el('span', { class: 'muted', text: `${S.recs.total} record(s)` })),
@@ -434,7 +480,7 @@ function drawRecords(body) {
     S.form ? buildForm(ent, S.form, body) : null,
     S.recs.items.length
       ? el('div', { class: 'table-wrap' }, el('table', null, el('thead', null, head), el('tbody', null, rows)))
-      : el('p', { class: 'muted', text: 'No records yet.' }),
+      : el('p', { class: 'muted', text: S.search.q || S.search.key ? 'No matching records. Clear the search to see all records.' : 'No records yet.' }),
     S.recs.items.length < S.recs.total
       ? el('button', { text: 'Load more', onclick: async () => { await loadRecords(true); drawRecords(body); } }) : null);
 }

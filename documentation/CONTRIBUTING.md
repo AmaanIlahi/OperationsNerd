@@ -81,3 +81,25 @@ Output goes to `scripts/benchmark/results/<timestamp>/report.md`. Live full runs
 - **Logistics rules:** `modules/logistics/`, as standalone code with its own tests. No imports from the core yet;
   the module interface is not built. Keep rules generic to logistics, never per company.
 - **Core data integrity:** the db layer, `operations_nerd/db/`, with tests in `operations_nerd/tests/`.
+
+### Record search workspace
+
+The CRM list supports literal, Unicode-normalized case-insensitive search over
+active field values, and an exact select/boolean filter combined with that search.
+The existing owner-only list endpoint accepts `q` (up to 200 characters) and
+`equals` (a JSON object mapping active field keys to exact JSON values, up to
+4000 encoded characters). Exact filters are case-sensitive and type-sensitive:
+`true`, `1`, null and a missing value are different. A valid but wrong-type
+filter yields no matches; unknown/archived field keys are rejected. Links and
+archived fields are not searched. Matching happens before pagination.
+
+This still scans the business's records in Python. It is intended for the
+current small-business prototype, not a production-scale indexed search service.
+A production release needs record-volume limits/indexing and endpoint abuse
+controls. No schema, writes, model calls or extra external services are added.
+
+Offline HTTP checks: `python operations_nerd/tests/test_record_search_api.py`.
+Browser acceptance uses a disposable local SQLite database and synthetic data:
+install Playwright/Chromium, then run
+`python scripts/verify_record_search_browser.py`. It uses port 8131 and saves
+screenshots under ignored `.browser-evidence/`. It never calls a live model.

@@ -24,3 +24,5 @@ ENV/
 # OS / editor
 .DS_Store
 .vscode/
+
+.browser-evidence/

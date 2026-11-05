@@ -233,15 +233,27 @@ def get_record(account_id: int, business_id: int, entity_key: str, record_id: in
 
 
 def list_records(account_id: int, business_id: int, entity_key: str,
-                 limit: int = DEFAULT_LIMIT, offset: int = 0) -> dict:
+                 limit: int = DEFAULT_LIMIT, offset: int = 0,
+                 query: str = "", equals: dict | None = None) -> dict:
     limit = max(1, min(limit, MAX_LIMIT))
     offset = max(0, offset)
     with d.get_conn() as conn:
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
-        records = d.list_entities(conn, business_id, entity_key)
-        page = records[offset:offset + limit]
+        active = {f['key'] for f in entity['fields'] if not f['archived']}
+        if not isinstance(query, str) or len(query) > 200:
+            raise RecordError(422, 'Search must be at most 200 characters')
+        if equals is not None and (not isinstance(equals, dict) or any(k not in active for k in equals)):
+            raise RecordError(422, 'Filters must name active fields in this entity')
+        try:
+            result = d.search_owned_entities(conn, business_id, account_id, entity_key,
+                query=query, fields=sorted(active), equals=equals, limit=limit, offset=offset)
+        except (ValueError, TypeError):
+            raise RecordError(422, 'Invalid search or filter value') from None
+        if result is None:
+            raise RecordError(404, 'Business not found')
+        page = result['records']
         link_views = _link_views(conn, business_id, spec, entity, page)
-    return {"total": len(records), "limit": limit, "offset": offset,
+    return {"total": result["total"], "limit": limit, "offset": offset,
             "records": [_view(entity, r, lv) for r, lv in zip(page, link_views)]}
 
 

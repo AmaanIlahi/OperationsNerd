@@ -6,6 +6,8 @@ Every handler resolves the logged-in account first and passes it down;
 anything the account does not own comes back as 404.
 """
 
+import json
+
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -102,9 +104,22 @@ def create_record(business_id: int, entity_key: str, payload: RecordValues, requ
 
 @router.get("/businesses/{business_id}/records/{entity_key}")
 def list_records(business_id: int, entity_key: str, request: Request,
-                 limit: int = records.DEFAULT_LIMIT, offset: int = 0):
+                 limit: int = records.DEFAULT_LIMIT, offset: int = 0,
+                 q: str = "", equals: str | None = None):
     account = auth.current_account(request)
-    return _run(records.list_records, account["id"], business_id, entity_key, limit, offset)
+    filters = None
+    if equals is not None:
+        if len(equals) > 4000:
+            raise HTTPException(status_code=422, detail="Filters are too long")
+        try:
+            def reject_constant(value):
+                raise ValueError(value)
+            filters = json.loads(equals, parse_constant=reject_constant)
+        except (ValueError, RecursionError):
+            raise HTTPException(status_code=422, detail="Filters must be valid JSON") from None
+        if not isinstance(filters, dict):
+            raise HTTPException(status_code=422, detail="Filters must be a JSON object")
+    return _run(records.list_records, account["id"], business_id, entity_key, limit, offset, q, filters)
 
 
 @router.get("/businesses/{business_id}/records/{entity_key}/{record_id}")
