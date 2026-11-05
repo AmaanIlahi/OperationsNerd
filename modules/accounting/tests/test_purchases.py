@@ -290,6 +290,107 @@ def test_a_bill_can_t_be_entered_already_sent_or_paid():
     assert a.bills(conn) == []
 
 
+def _rollback(conn, fn):
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        fn()
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
+def test_a_bill_payment_and_void_can_t_precede_its_entry_and_its_entry_is_its_own():
+    """The bill side of the same rules as invoices: a payment or a void dated before the bill's entry makes
+    the aging disagree with payables, a payment entry is not reversed, and two bills can't share an entry."""
+    conn, _ = books("bill_dates")
+    supplier = a_supplier(conn, "Dockside Roastery")
+    draft = a_bill(conn, supplier["id"], issue_date="2026-03-01")
+    bill = a.receive_bill(conn, draft["bill_id"], "receive", entry_date="2026-04-01")
+    rejected(lambda: a.record_bill_payment(conn, bill["bill_id"], 100, "2026-03-15", bank(conn), "early"),
+             "payment_date 2026-03-15 is before the entry date 2026-04-01", ValueError)
+    rejected(lambda: a.void_bill(conn, bill["bill_id"], "entered twice", "void", entry_date="2026-03-15"),
+             "entry_date 2026-03-15 is before the entry date 2026-04-01", ValueError)
+    bank_id = bank(conn)
+    ap = a.account_by_code(conn, "2100")["account_id"]
+
+    def early_payment():
+        def work():
+            entry_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents, credit_cents)
+                            VALUES (?, 1, ?, 100, 0)""", (entry_id, ap))
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents, credit_cents)
+                            VALUES (?, 2, ?, 0, 100)""", (entry_id, bank_id))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              idempotency_key)
+                            VALUES (?, '2026-03-15', 'Early payment', 'bill_payment', 100, 'raw-entry')""",
+                         (entry_id,))
+            conn.execute("""INSERT INTO acct_bill_payments (bill_id, payment_date, amount_cents,
+                                    paid_from_account_id, entry_id, idempotency_key)
+                            VALUES (?, '2026-03-15', 100, ?, ?, 'raw-pay')""",
+                         (bill["bill_id"], bank_id, entry_id))
+        _rollback(conn, work)
+
+    rejected(early_payment, "a payment is dated on or after the bill's entry")
+
+    def early_void():
+        def work():
+            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+                                    FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
+                                 (bill["entry_id"],)).fetchall()
+            reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            for line in lines:
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                                credit_cents)
+                                VALUES (?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
+                              line["debit_cents"]))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              reverses_id, idempotency_key)
+                            VALUES (?, '2026-03-15', 'Early void', 'bill', ?, ?, 'raw-void')""",
+                         (reversal_id, bill["total_cents"], bill["entry_id"]))
+            conn.execute("UPDATE acct_bills SET status = 'void', void_entry_id = ? WHERE id = ?",
+                         (reversal_id, bill["bill_id"]))
+        _rollback(conn, work)
+
+    rejected(early_void, "a void is dated on or after the bill's entry")
+    other = received_bill(conn, supplier["id"], "DR-2")
+    rejected(lambda: conn.execute("UPDATE acct_bills SET entry_id = ? WHERE id = ?",
+                                  (bill["entry_id"], other["bill_id"])),
+             "UNIQUE constraint failed")
+    paid = a.record_bill_payment(conn, bill["bill_id"], 100, "2026-04-01", bank_id, "pay")
+    payment_entry = paid["payments"][0]["entry_id"]
+    rejected(lambda: a.reverse_journal_entry(conn, payment_entry, "rev:pay"),
+             "was posted by bill_payment; only a manual or payroll entry can be reversed here",
+             a.InvalidState)
+
+    def reverse_payment():
+        def work():
+            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+                                    FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
+                                 (payment_entry,)).fetchall()
+            reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            for line in lines:
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                                credit_cents)
+                                VALUES (?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
+                              line["debit_cents"]))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              reverses_id, idempotency_key)
+                            VALUES (?, '2026-04-01', 'Undo payment', 'bill_payment', 100, ?, 'raw-rev')""",
+                         (reversal_id, payment_entry))
+        _rollback(conn, work)
+
+    rejected(reverse_payment, "a payment entry is not reversed")
+    assert a.bill(conn, bill["bill_id"])["status"] == "sent"
+    assert a.bill(conn, other["bill_id"])["entry_id"] != bill["entry_id"]
+    for day in ("2026-03-31", "2026-04-01"):
+        assert a.ap_aging(conn, as_of=day)["totals"]["total_cents"] == a.account_balance(
+            conn, ap, as_of=day)["balance_cents"], day
+
+
 def test_replaying_a_bill_command_changes_nothing():
     conn, _ = books("replay_bill")
     supplier = a_supplier(conn, "Dockside Roastery")

@@ -79,7 +79,8 @@ Queries derive it from the due date and an `as_of` date and return it as
 | `overdue` | derived: `sent` (or part-paid) and `due_date < as_of` | — |
 
 Voiding is the only way back: a document with any money against it can never be
-voided (reverse or refund the payment first), and a void never deletes anything,
+voided (there is no refund in v1, and a payment entry is not reversed on its own),
+and a void never deletes anything,
 so the original entry and its reversal both stay on file.
 
 **Commands** each run in one `BEGIN IMMEDIATE` transaction with an idempotency
@@ -321,8 +322,10 @@ automatic backups":
   rolls back completely, while the versions before it in the same run are kept.
   It refuses to go backwards or to open a database newer than the code.
 - 0001 is a usable ledger on its own (accounts and the journal); 0002 adds
-  customers, suppliers, invoices, bills and payments. Both are additive, so an
-  upgrade rewrites nothing.
+  customers, suppliers, invoices, bills and payments; 0003 keeps a payment or a
+  void from being dated before the document's entry, refuses a reversal of a
+  payment entry, and gives each document its own journal entry. All three are
+  additive, so an upgrade rewrites nothing.
 
 `accounting.init_db(conn, backup_dir=None)` is
 `migrate(conn, "accounting", accounting.MIGRATIONS)` followed by
@@ -347,8 +350,8 @@ python -m pytest modules/accounting/tests           # if pytest is installed
 | script | tests | covers |
 |---|---|---|
 | `test_ledger.py` | 30 | the chart of accounts (codes, types, roles, deactivation), balanced entries and every way to unbalance one, reversals and mirrored lines, append-only-ness, idempotent replay/conflict/failed key, 8 concurrent posters, input limits, raw SQL against every account, entry and line rule, and that the payroll hook has no call site (by AST) |
-| `test_sales.py` | 25 | customers, draft invoices and their lines, sending, part and full payments, overpaying, voiding a draft and a sent invoice, overdue derived from `as_of`, listing and filters, replay, a racing overpay, raw SQL against every invoice rule |
-| `test_purchases.py` | 15 | suppliers, bill numbers unique per supplier, receiving, payments, voiding, expense-account and control-account rules, replay, raw SQL against every bill rule |
+| `test_sales.py` | 30 | customers, draft invoices and their lines, sending, part and full payments, overpaying, voiding a draft and a sent invoice, overdue derived from `as_of`, listing and filters, replay, a racing overpay, raw SQL against every invoice rule |
+| `test_purchases.py` | 16 | suppliers, bill numbers unique per supplier, receiving, payments, voiding, expense-account and control-account rules, replay, raw SQL against every bill rule |
 | `test_reports.py` | 18 | a hand-computed year: trial balance, P&L (accrual, not cash), the balance sheet balancing on every 7th day of the year, retained earnings, aging buckets and their boundaries, each aging equalling its control account at five dates, voids/drafts/part payments in the agings, and `as_of` defaulting to today without being stored |
 | `test_migrations.py` | 17 | fresh, rerun, stepwise upgrade with a backup holding the old data, v1 usable alone, failing migration rolls back (keeping earlier versions of the same run), numbering rules, a newer database refused, sharing a database with HR's and logistics' tables, a 4-thread migration race, concurrent migrators taking one backup, in-memory, schema-tamper detection, every date CHECK refusing impossible days on any SQLite version, every money column INTEGER and capped |
 | `test_api.py` | 20 | every endpoint, 404/409/422/503 mapping, `Idempotency-Key` required and replayed, strict JSON types (no `"100"`→100 or `true`→1), empty bodies on send/receive, too-big numbers, length limits on bodies, header, query and path, a vanished database, a tampered schema, `main.py` mounting the router and the UI only when enabled and never in production, the UI never building HTML from a string, and every command being reachable over HTTP |

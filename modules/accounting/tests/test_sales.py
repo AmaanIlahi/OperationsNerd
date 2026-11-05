@@ -497,6 +497,180 @@ def test_replaying_a_send_or_a_payment_changes_nothing():
              "was already used for record_invoice_payment", a.IdempotencyConflict)
 
 
+def _rollback(conn, fn):
+    """Runs fn() in one transaction and undoes it, including when fn() itself raises."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        fn()
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+
+
+def test_a_waived_line_on_its_own_account_posts_nothing_to_that_account():
+    """A zero price is a real line on the invoice, but it is not a journal line: both amounts would be 0,
+    which the journal refuses. Sending used to die there when the waived line sat on its own account."""
+    conn, _ = books("waived")
+    customer = a_customer(conn, "Northgate Offices")
+    a.add_account(conn, "delivery", "4010", "Delivery", "income")
+    draft = an_invoice(conn, customer["id"], lines=[
+        {"description": "Catering", "unit_price_cents": 10_000, "account_code": "4000"},
+        {"description": "Delivery (waived)", "unit_price_cents": 0, "account_code": "4010"},
+    ])
+    invoice = a.send_invoice(conn, draft["invoice_id"], "send")
+    assert [(line["description"], line["amount_cents"]) for line in invoice["lines"]] == [
+        ("Catering", 10_000), ("Delivery (waived)", 0)]
+    posted = a.journal_entry(conn, invoice["entry_id"])
+    assert [(line["account_code"], line["debit_cents"], line["credit_cents"]) for line in posted["lines"]] == [
+        ("1100", 10_000, 0), ("4000", 0, 10_000)]
+    assert a.account_by_code(conn, "4010")["balance_cents"] == 0
+    assert a.trial_balance(conn, as_of="2026-03-01")["balanced"]
+    receivable = a.account_by_code(conn, "1100")["account_id"]
+    assert a.ar_aging(conn, as_of="2026-03-01")["totals"]["total_cents"] == a.account_balance(
+        conn, receivable, as_of="2026-03-01")["balance_cents"] == 10_000
+
+
+def test_a_payment_is_not_dated_before_the_documents_entry():
+    """A receipt dated before the invoice's entry credits receivables on a day the invoice is not in the
+    aging, so the two stop agreeing. The same day as the entry is the earliest that keeps them equal."""
+    conn, _ = books("pay_date")
+    customer = a_customer(conn, "Northgate Offices")
+    draft = an_invoice(conn, customer["id"], issue_date="2026-03-01")
+    invoice = a.send_invoice(conn, draft["invoice_id"], "send", entry_date="2026-04-01")
+    rejected(lambda: a.record_invoice_payment(conn, invoice["invoice_id"], 100, "2026-03-15", bank(conn),
+                                              "early"),
+             "payment_date 2026-03-15 is before the entry date 2026-04-01", ValueError)
+    assert a.invoice(conn, invoice["invoice_id"])["amount_paid_cents"] == 0
+    paid = a.record_invoice_payment(conn, invoice["invoice_id"], 100, "2026-04-01", bank(conn), "ok")
+    assert paid["amount_paid_cents"] == 100
+    bank_id = bank(conn)
+    ar = a.account_by_code(conn, "1100")["account_id"]
+
+    def early_receipt():
+        def work():
+            entry_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents, credit_cents)
+                            VALUES (?, 1, ?, 100, 0), (?, 2, ?, 0, 100)""",
+                         (entry_id, bank_id, entry_id, ar))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              idempotency_key)
+                            VALUES (?, '2026-03-15', 'Early receipt', 'invoice_payment', 100, 'raw-entry')""",
+                         (entry_id,))
+            conn.execute("""INSERT INTO acct_invoice_payments (invoice_id, payment_date, amount_cents,
+                                    deposit_account_id, entry_id, idempotency_key)
+                            VALUES (?, '2026-03-15', 100, ?, ?, 'raw-pay')""",
+                         (invoice["invoice_id"], bank_id, entry_id))
+        _rollback(conn, work)
+
+    rejected(early_receipt, "a receipt is dated on or after the invoice's entry")
+    assert a.invoice(conn, invoice["invoice_id"])["amount_paid_cents"] == 100
+    for day in ("2026-03-31", "2026-04-01"):
+        assert a.ar_aging(conn, as_of=day)["totals"]["total_cents"] == a.account_balance(
+            conn, ar, as_of=day)["balance_cents"], day
+
+
+def test_a_void_is_not_dated_before_the_documents_entry():
+    """A void dated first puts the reversal in the books before the invoice, so receivables go the wrong way
+    on the days in between and the aging, which skips the invoice, no longer matches them."""
+    conn, _ = books("void_date")
+    customer = a_customer(conn, "Northgate Offices")
+    draft = an_invoice(conn, customer["id"], issue_date="2026-03-01")
+    invoice = a.send_invoice(conn, draft["invoice_id"], "send", entry_date="2026-04-01")
+    rejected(lambda: a.void_invoice(conn, invoice["invoice_id"], "wrong customer", "void",
+                                    entry_date="2026-03-15"),
+             "entry_date 2026-03-15 is before the entry date 2026-04-01", ValueError)
+
+    def early_void():
+        def work():
+            original = invoice["entry_id"]
+            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+                                    FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
+                                 (original,)).fetchall()
+            reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            for line in lines:
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                                credit_cents)
+                                VALUES (?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
+                              line["debit_cents"]))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              reverses_id, idempotency_key)
+                            VALUES (?, '2026-03-15', 'Early void', 'invoice', ?, ?, 'raw-void')""",
+                         (reversal_id, invoice["total_cents"], original))
+            conn.execute("UPDATE acct_invoices SET status = 'void', void_entry_id = ? WHERE id = ?",
+                         (reversal_id, invoice["invoice_id"]))
+        _rollback(conn, work)
+
+    rejected(early_void, "a void is dated on or after the invoice's entry")
+    assert a.invoice(conn, invoice["invoice_id"])["status"] == "sent"
+    assert len(a.journal_entries(conn)) == 1
+    voided = a.void_invoice(conn, invoice["invoice_id"], "wrong customer", "void:ok")
+    assert a.journal_entry(conn, voided["void_entry_id"])["entry_date"] == "2026-04-01"
+    receivable = a.account_by_code(conn, "1100")["account_id"]
+    for day in ("2026-03-31", "2026-04-01"):
+        assert a.ar_aging(conn, as_of=day)["totals"]["total_cents"] == a.account_balance(
+            conn, receivable, as_of=day)["balance_cents"] == 0, day
+
+
+def test_a_document_entry_or_a_payment_entry_is_not_reversed_on_its_own():
+    """Reversing the invoice's entry, or the receipt's, takes the figure out of the journal and leaves the
+    document still counting it, so the aging and the receivable account disagree. Void is what reverses an
+    invoice; a receipt is not reversed at all."""
+    conn, _ = books("no_reverse_doc")
+    customer = a_customer(conn, "Northgate Offices")
+    invoice = sent_invoice(conn, customer["id"])
+    rejected(lambda: a.reverse_journal_entry(conn, invoice["entry_id"], "rev:inv"),
+             "was posted by invoice; only a manual or payroll entry can be reversed here", a.InvalidState)
+    paid = a.record_invoice_payment(conn, invoice["invoice_id"], 10_000, "2026-03-10", bank(conn), "pay")
+    payment_entry = paid["payments"][0]["entry_id"]
+    rejected(lambda: a.reverse_journal_entry(conn, payment_entry, "rev:pay"),
+             "was posted by invoice_payment; only a manual or payroll entry can be reversed here",
+             a.InvalidState)
+
+    def reverse_payment():
+        def work():
+            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+                                    FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
+                                 (payment_entry,)).fetchall()
+            reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
+            for line in lines:
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                                credit_cents)
+                                VALUES (?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
+                              line["debit_cents"]))
+            conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
+                                                              reverses_id, idempotency_key)
+                            VALUES (?, '2026-03-10', 'Undo receipt', 'invoice_payment', 10000, ?, 'raw-rev')""",
+                         (reversal_id, payment_entry))
+        _rollback(conn, work)
+
+    rejected(reverse_payment, "a payment entry is not reversed")
+    assert a.invoice(conn, invoice["invoice_id"])["amount_paid_cents"] == 10_000
+    assert a.invoice(conn, invoice["invoice_id"])["status"] == "sent"
+    receivable = a.account_by_code(conn, "1100")["account_id"]
+    assert a.ar_aging(conn, as_of="2026-03-31")["totals"]["total_cents"] == a.account_balance(
+        conn, receivable, as_of="2026-03-31")["balance_cents"] == 20_000
+
+
+def test_two_invoices_can_t_share_one_journal_entry():
+    """The entry check only asks that receivables were debited by this invoice's total, so two invoices for
+    the same amount would both accept one entry and the aging would count it twice."""
+    conn, _ = books("shared_entry")
+    customer = a_customer(conn, "Northgate Offices")
+    first = sent_invoice(conn, customer["id"], "INV-001")
+    second = sent_invoice(conn, customer["id"], "INV-002")
+    rejected(lambda: conn.execute("UPDATE acct_invoices SET entry_id = ? WHERE id = ?",
+                                  (first["entry_id"], second["invoice_id"])),
+             "UNIQUE constraint failed")
+    assert a.invoice(conn, second["invoice_id"])["entry_id"] == second["entry_id"]
+    receivable = a.account_by_code(conn, "1100")["account_id"]
+    assert a.ar_aging(conn, as_of="2026-03-31")["totals"]["total_cents"] == a.account_balance(
+        conn, receivable, as_of="2026-03-31")["balance_cents"] == 60_000
+
+
 def test_two_threads_paying_the_same_invoice_can_t_overpay_it():
     """Each thread pays the whole outstanding amount with its own key; one wins and the other finds the
     invoice settled."""
