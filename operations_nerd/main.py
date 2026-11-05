@@ -51,6 +51,23 @@ if os.environ.get("CONFIG_AGENT_ENABLED") == "1":
     app.include_router(config_agent_router)
     app.mount("/agent", StaticFiles(directory="frontend_agent", html=True), name="agent")
 
+# Accounting module API (modules/accounting/): the chart of accounts, the journal,
+# invoices, bills, payments and the reports, on the SQLite file in
+# ACCOUNTING_DATABASE_PATH. It has no login or per-business database routing yet,
+# so it is a local development surface only: mounted when
+# ACCOUNTING_MODULE_ENABLED=1, never when APP_ENV=production. /accounting/ui is a
+# read-only view of it.
+if os.environ.get("ACCOUNTING_MODULE_ENABLED") == "1" and not agentic_config.is_production():
+    import importlib.util
+    _accounting_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "modules", "accounting")
+    _accounting_spec = importlib.util.spec_from_file_location("accounting_module_api",
+                                                              os.path.join(_accounting_dir, "api.py"))
+    _accounting_api = importlib.util.module_from_spec(_accounting_spec)
+    _accounting_spec.loader.exec_module(_accounting_api)
+    app.include_router(_accounting_api.router)
+    app.mount("/accounting/ui", StaticFiles(directory=os.path.join(_accounting_dir, "frontend"), html=True),
+              name="accounting_ui")
+
 
 # Production serves only /app, /api/* and /healthz. The legacy demo routes
 # (questionnaire, state, pipeline, approval, /ui, /agent) have no auth and are
