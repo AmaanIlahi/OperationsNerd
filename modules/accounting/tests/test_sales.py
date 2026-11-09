@@ -551,9 +551,12 @@ def test_a_payment_is_not_dated_before_the_documents_entry():
     def early_receipt():
         def work():
             entry_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
-            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents, credit_cents)
-                            VALUES (?, 1, ?, 100, 0), (?, 2, ?, 0, 100)""",
-                         (entry_id, bank_id, entry_id, ar))
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
+                                                            credit_cents) VALUES (?, 1, ?, 1, 100, 0)""",
+                         (entry_id, bank_id))
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
+                                                            credit_cents) VALUES (?, 2, ?, 1, 0, 100)""",
+                         (entry_id, ar))
             conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
                                                               idempotency_key)
                             VALUES (?, '2026-03-15', 'Early receipt', 'invoice_payment', 100, 'raw-entry')""",
@@ -585,16 +588,16 @@ def test_a_void_is_not_dated_before_the_documents_entry():
     def early_void():
         def work():
             original = invoice["entry_id"]
-            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+            lines = conn.execute("""SELECT line_no, account_id, fund_id, debit_cents, credit_cents
                                     FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
                                  (original,)).fetchall()
             reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
             for line in lines:
-                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
                                                                 credit_cents)
-                                VALUES (?, ?, ?, ?, ?)""",
-                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
-                              line["debit_cents"]))
+                                VALUES (?, ?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["fund_id"],
+                              line["credit_cents"], line["debit_cents"]))
             conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
                                                               reverses_id, idempotency_key)
                             VALUES (?, '2026-03-15', 'Early void', 'invoice', ?, ?, 'raw-void')""",
@@ -631,16 +634,16 @@ def test_a_document_entry_or_a_payment_entry_is_not_reversed_on_its_own():
 
     def reverse_payment():
         def work():
-            lines = conn.execute("""SELECT line_no, account_id, debit_cents, credit_cents
+            lines = conn.execute("""SELECT line_no, account_id, fund_id, debit_cents, credit_cents
                                     FROM acct_journal_lines WHERE entry_id = ? ORDER BY line_no""",
                                  (payment_entry,)).fetchall()
             reversal_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM acct_journal_entries").fetchone()[0]
             for line in lines:
-                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
                                                                 credit_cents)
-                                VALUES (?, ?, ?, ?, ?)""",
-                             (reversal_id, line["line_no"], line["account_id"], line["credit_cents"],
-                              line["debit_cents"]))
+                                VALUES (?, ?, ?, ?, ?, ?)""",
+                             (reversal_id, line["line_no"], line["account_id"], line["fund_id"],
+                              line["credit_cents"], line["debit_cents"]))
             conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
                                                               reverses_id, idempotency_key)
                             VALUES (?, '2026-03-10', 'Undo receipt', 'invoice_payment', 10000, ?, 'raw-rev')""",

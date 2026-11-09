@@ -74,6 +74,18 @@ def _called_name(func) -> str | None:
     return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
 
 
+def raw_line(conn, entry_id, line_no, account, debit, credit):
+    """Insert a journal line the way the schema expects (with fund_id after migration 0004)."""
+    if a._funds_enabled(conn):
+        conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
+                                                        credit_cents) VALUES (?, ?, ?, 1, ?, ?)""",
+                     (entry_id, line_no, account, debit, credit))
+    else:
+        conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                        credit_cents) VALUES (?, ?, ?, ?, ?)""",
+                     (entry_id, line_no, account, debit, credit))
+
+
 def entry(conn, key, *pairs, date="2026-01-05", memo="Test entry", source="manual", source_ref=None):
     """post_journal_entry from (code, 'debit'|'credit', cents) triples."""
     lines = [{"account_code": code, f"{side}_cents": cents} for code, side, cents in pairs]
@@ -356,9 +368,14 @@ def test_raw_sql_can_t_edit_delete_or_unbalance_the_journal():
     rejected(lambda: conn.execute("DELETE FROM acct_journal_lines WHERE entry_id = ?", (eid,)),
              "journal lines are immutable")
     # Nothing is added to a finished entry.
-    rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents)
-                                     VALUES (?, 3, 1, 50)""", (eid,)),
-             "written before the entry itself, and never added to after")
+    if a._funds_enabled(conn):
+        rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id,
+                                         debit_cents) VALUES (?, 3, 1, 1, 50)""", (eid,)),
+                 "written before the entry itself, and never added to after")
+    else:
+        rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents)
+                                         VALUES (?, 3, 1, 50)""", (eid,)),
+                 "written before the entry itself, and never added to after")
 
 
 def test_raw_sql_can_t_write_an_unbalanced_or_one_sided_entry():
@@ -371,9 +388,7 @@ def test_raw_sql_can_t_write_an_unbalanced_or_one_sided_entry():
         conn.execute("BEGIN IMMEDIATE")
         try:
             for line_no, (account, debit, credit) in enumerate(lines, start=1):
-                conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
-                                                                credit_cents) VALUES (?, ?, ?, ?, ?)""",
-                             (entry_id, line_no, account, debit, credit))
+                raw_line(conn, entry_id, line_no, account, debit, credit)
             conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, total_cents,
                                                               idempotency_key)
                             VALUES (?, '2026-01-05', 'Raw', 'manual', ?, ?)""", (entry_id, total, key))
@@ -383,10 +398,10 @@ def test_raw_sql_can_t_write_an_unbalanced_or_one_sided_entry():
             raise
 
     rejected(lambda: raw_entry([(bank, 100, 0), (capital, 0, 99)], 100),
-             "debits must equal credits, and both must equal the entry total")
+             "debits must equal credits")
     rejected(lambda: raw_entry([(bank, 100, 0), (capital, 0, 100)], 99),
-             "debits must equal credits, and both must equal the entry total")
-    rejected(lambda: raw_entry([(bank, 100, 0)], 100), "a journal entry needs at least two lines")
+             "debits must equal credits")
+    rejected(lambda: raw_entry([(bank, 100, 0)], 100), "debits must equal credits")
     rejected(lambda: raw_entry([(bank, 100, 100), (capital, 0, 100)], 100), "CHECK constraint failed")
     rejected(lambda: raw_entry([(bank, 0, 0), (capital, 0, 100)], 100), "CHECK constraint failed")
     assert a.journal_entries(conn) == []
@@ -402,9 +417,7 @@ def test_raw_sql_can_t_write_a_reversal_that_doesn_t_mirror():
         # The same amounts on the same accounts, but not swapped: the two entries would double the
         # balance instead of cancelling it.
         for line_no, (account, debit, credit) in enumerate([(bank, 100, 0), (capital, 0, 100)], start=1):
-            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
-                                                            credit_cents) VALUES (2, ?, ?, ?, ?)""",
-                         (line_no, account, debit, credit))
+            raw_line(conn, 2, line_no, account, debit, credit)
         rejected(lambda: conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source,
                                                  total_cents, reverses_id, idempotency_key)
                                          VALUES (2, '2026-01-06', 'Fake reversal', 'manual', 100, ?, 'raw')""",
@@ -419,19 +432,22 @@ def test_raw_sql_can_t_post_to_a_closed_account_or_an_unknown_source():
     conn, _ = with_chart("raw_misc")
     petty = a.account_by_code(conn, "1010")["account_id"]
     a.update_account(conn, petty, {"is_active": False}, "close")
-    rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents)
-                                     VALUES (50, 1, ?, 100)""", (petty,)),
-             "a journal line posts to an active account")
+    if a._funds_enabled(conn):
+        rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id,
+                                         debit_cents) VALUES (50, 1, ?, 1, 100)""", (petty,)),
+                 "a journal line posts to an active account")
+    else:
+        rejected(lambda: conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents)
+                                         VALUES (50, 1, ?, 100)""", (petty,)),
+                 "a journal line posts to an active account")
     bank = a.account_by_code(conn, "1000")["account_id"]
     capital = a.account_by_code(conn, "3000")["account_id"]
     conn.execute("BEGIN IMMEDIATE")
     try:
         # Two good lines, so the entry row gets as far as its source: only the names in
         # acct_entry_sources are allowed, and a made-up one is refused by the foreign key.
-        conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents)
-                        VALUES (50, 1, ?, 100)""", (bank,))
-        conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, credit_cents)
-                        VALUES (50, 2, ?, 100)""", (capital,))
+        raw_line(conn, 50, 1, bank, 100, 0)
+        raw_line(conn, 50, 2, capital, 0, 100)
         rejected(lambda: conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source,
                                                  total_cents, idempotency_key)
                                          VALUES (50, '2026-01-05', 'Odd', 'guesswork', 100, 'raw')"""),

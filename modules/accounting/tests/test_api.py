@@ -90,7 +90,7 @@ def a_bill(s, key="bill", number="DR-1", cents=27_000, **extra):
 
 def test_account_endpoints():
     s = seeded("accounts")
-    assert s.get("/accounting/schema") == {"module": "accounting", "version": 3}
+    assert s.get("/accounting/schema") == {"module": "accounting", "version": 4}
     assert [x["code"] for x in s.get("/accounting/accounts")] == [c[0] for c in CHART]
     assert [x["code"] for x in s.get("/accounting/accounts?account_type=income")] == ["4000"]
     bank = s.get("/accounting/accounts/1")
@@ -411,7 +411,7 @@ def test_no_api_body_carries_a_field_this_module_has_no_business_holding():
               "passport", "dob", "birth", "medical", "health", "card", "cvv"}
     models = [m for m in vars(api).values()
               if isinstance(m, type) and issubclass(m, api._Body) and m is not api._Body]
-    assert len(models) == 13
+    assert len(models) == 17
     for model in models:
         for name in model.model_fields:
             assert not banned & set(name.split("_")), (model.__name__, name)
@@ -443,7 +443,7 @@ def test_main_mounts_the_router_and_the_ui_only_when_enabled():
     for path in ("/accounting/accounts", "/accounting/journal", "/accounting/invoices/{invoice_id}/send",
                  "/accounting/bills/{bill_id}/payments", "/accounting/reports/trial-balance"):
         assert path in on["paths"], path
-    assert on["schema"] == {"module": "accounting", "version": 3} and on["ui"] == 200
+    assert on["schema"] == {"module": "accounting", "version": 4} and on["ui"] == 200
     off = _routes_of_main("0")
     assert off["paths"] == [] and off["ui"] == 404
 
@@ -472,8 +472,11 @@ def test_the_api_covers_every_command_the_module_has():
     assert commands == {"add_account", "update_account", "post_journal_entry", "reverse_journal_entry",
                         "add_customer", "update_customer", "add_supplier", "update_supplier",
                         "create_invoice", "send_invoice", "record_invoice_payment", "void_invoice",
-                        "create_bill", "receive_bill", "record_bill_payment", "void_bill"}
-    for path in ("/accounting/accounts", "/accounting/accounts/{account_id}", "/accounting/journal",
+                        "create_bill", "receive_bill", "record_bill_payment", "void_bill",
+                        "add_fund", "update_fund", "record_grant_receipt", "release_from_restriction"}
+    for path in ("/accounting/accounts", "/accounting/accounts/{account_id}", "/accounting/funds",
+                 "/accounting/funds/{fund_id}", "/accounting/funds/grant-receipt",
+                 "/accounting/funds/release-from-restriction", "/accounting/journal",
                  "/accounting/journal/{entry_id}/reverse", "/accounting/customers",
                  "/accounting/customers/{customer_id}", "/accounting/suppliers",
                  "/accounting/suppliers/{supplier_id}", "/accounting/invoices",
