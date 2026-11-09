@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accounting - Operations Nerd</title>
+<!--
+  A read-only window onto the accounting module's API (modules/accounting/api.py),
+  mounted at /accounting/ui alongside the router. It only ever reads: every figure
+  here comes from a GET, and anything that changes the books is a command with an
+  idempotency key, which belongs in the app proper once there is a login and a
+  per-business database (see README).
+
+  Everything is rendered with createElement and textContent. innerHTML is never
+  used, so a customer called `<img src=x onerror=...>` is drawn as that text and
+  not as HTML -- the same rule as operations_nerd/frontend/index.html, which has a
+  test of its own about it (tests/test_xss_in_frontend.py).
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 1100px; }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1.25rem; opacity: .7; }
+  nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+  button { font: inherit; padding: .35rem .8rem; cursor: pointer; border: 1px solid #8884;
+           border-radius: 6px; background: #8881; }
+  button[aria-current="true"] { background: #2563eb; color: #fff; border-color: #2563eb; }
+  label { display: inline-flex; gap: .4rem; align-items: center; margin-bottom: 1rem; }
+  input { font: inherit; padding: .3rem .4rem; border: 1px solid #8884; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+  caption { text-align: left; font-weight: 600; padding: .5rem 0; }
+  th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #8883; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 600; }
+  .pill { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; background: #8882; }
+  .pill.overdue { background: #dc26263d; }
+  .pill.paid { background: #16a34a3d; }
+  .problem { padding: .75rem 1rem; border-left: 3px solid #dc2626; background: #dc26261a; }
+</style>
+</head>
+<body>
+<h1>Accounting</h1>
+<p class="sub">Read-only view of this business's books. Local development surface: see
+  <code>modules/accounting/README.md</code>.</p>
+
+<nav id="tabs"></nav>
+<label>As of <input id="as-of" type="date"></label>
+<div id="panel"></div>
+
+<script>
+"use strict";
+
+const API = "/accounting";
+const TABS = [
+  ["trial-balance", "Trial balance"],
+  ["profit-and-loss", "Profit & loss"],
+  ["balance-sheet", "Balance sheet"],
+  ["ar-aging", "Owed to us"],
+  ["ap-aging", "Owed by us"],
+  ["invoices", "Invoices"],
+  ["bills", "Bills"],
+  ["accounts", "Chart of accounts"],
+  ["funds", "Funds"],
+  ["fund-balances", "Fund balances"],
+];
+
+const panel = document.getElementById("panel");
+const asOfInput = document.getElementById("as-of");
+let current = TABS[0][0];
+
+/** createElement + textContent only: strings from the API are never parsed as HTML. */
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  for (const [name, value] of Object.entries(attrs || {})) {
+    if (value !== null && value !== undefined) node.setAttribute(name, String(value));
+  }
+  for (const child of children || []) {
+    node.appendChild(typeof child === "string" || typeof child === "number"
+      ? document.createTextNode(String(child)) : child);
+  }
+  return node;
+}
+
+/** Cents as the money a person reads. Integer arithmetic only; no amount is ever a float here. */
+function money(cents) {
+  const negative = cents < 0;
+  const whole = Math.abs(cents);
+  const text = `${Math.floor(whole / 100)}.${String(whole % 100).padStart(2, "0")}`;
+  return negative ? `(${text})` : text;
+}
+
+function table(caption, columns, rows, footer) {
+  const head = el("tr", {}, columns.map(c => el("th", { class: c.number ? "n" : null }, [c.label])));
+  const body = rows.map(row => el("tr", {}, columns.map(c => {
+    const value = c.get(row);
+    return el("td", { class: c.number ? "n" : null },
+      [typeof value === "object" && value !== null ? value : String(value ?? "")]);
+  })));
+  const parts = [el("caption", {}, [caption]), el("thead", {}, [head]), el("tbody", {}, body)];
+  if (footer) {
+    parts.push(el("tfoot", {}, [el("tr", {}, columns.map((c, i) =>
+      el("td", { class: c.number ? "n" : null }, [i === 0 ? "Total" : (footer[c.key] ?? "")])))]));
+  }
+  if (!rows.length) parts.push(el("tfoot", {}, [el("tr", {}, [el("td", { colspan: columns.length },
+    ["Nothing to show yet."])])]));
+  return el("table", {}, parts);
+}
+
+function statusPill(document_) {
+  const status = document_.effective_status;
+  return el("span", { class: `pill ${status}` }, [status]);
+}
+
+async function load(path) {
+  const response = await fetch(API + path);
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try { detail = (await response.json()).detail || detail; } catch (ignored) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+const ACCOUNT_COLUMNS = [
+  { key: "code", label: "Code", get: r => r.code },
+  { key: "name", label: "Name", get: r => r.name },
+  { key: "account_type", label: "Type", get: r => r.account_type },
+  { key: "balance_cents", label: "Balance", number: true, get: r => money(r.balance_cents) },
+];
+
+const VIEWS = {
+  "trial-balance": async asOf => {
+    const report = await load(`/reports/trial-balance?as_of=${asOf}`);
+    const rows = report.rows.map(r => el("tr", {}, [
+      el("td", {}, [r.code]), el("td", {}, [r.name]), el("td", {}, [r.account_type]),
+      el("td", { class: "n" }, [money(r.debit_cents)]), el("td", { class: "n" }, [money(r.credit_cents)]),
+    ]));
+    const foot = el("tr", {}, [
+      el("td", { colspan: 3 }, [report.balanced ? "Total (debits equal credits)" : "Total (NOT BALANCED)"]),
+      el("td", { class: "n" }, [money(report.total_debit_cents)]),
+      el("td", { class: "n" }, [money(report.total_credit_cents)]),
+    ]);
+    return [el("table", {}, [
+      el("caption", {}, [`Trial balance as of ${report.as_of}`]),
+      el("thead", {}, [el("tr", {}, ["Code", "Name", "Type", "Debit", "Credit"].map((label, i) =>
+        el("th", { class: i >= 3 ? "n" : null }, [label])))]),
+      el("tbody", {}, rows), el("tfoot", {}, [foot]),
+    ])];
+  },
+
+  "profit-and-loss": async asOf => {
+    const from = `${asOf.slice(0, 4)}-01-01`;
+    const report = await load(`/reports/profit-and-loss?from_date=${from}&to_date=${asOf}`);
+    const column = [
+      { key: "name", label: "Account", get: r => `${r.code} ${r.name}` },
+      { key: "balance_cents", label: "Amount", number: true, get: r => money(r.balance_cents) },
+    ];
+    return [
+      table(`Income, ${report.from_date} to ${report.to_date}`, column, report.income,
+        { balance_cents: money(report.total_income_cents) }),
+      table("Expenses", column, report.expenses, { balance_cents: money(report.total_expense_cents) }),
+      el("p", {}, [`Net ${report.net_income_cents < 0 ? "loss" : "profit"}: ${money(report.net_income_cents)}`]),
+    ];
+  },
+
+  "balance-sheet": async asOf => {
+    const report = await load(`/reports/balance-sheet?as_of=${asOf}`);
+    const parts = [
+      table(`Assets as of ${report.as_of}`, ACCOUNT_COLUMNS, report.assets,
+        { balance_cents: money(report.total_assets_cents) }),
+      table("Liabilities", ACCOUNT_COLUMNS, report.liabilities,
+        { balance_cents: money(report.total_liabilities_cents) }),
+      table("Equity", ACCOUNT_COLUMNS, report.equity,
+        { balance_cents: money(report.total_equity_cents) }),
+      el("p", {}, [`Profit since the books opened (not yet closed to equity): `
+        + money(report.retained_earnings_cents)]),
+    ];
+    if (!report.balanced) {
+      parts.push(el("p", { class: "problem" }, ["Assets do not equal liabilities plus equity plus retained "
+        + "earnings. Something has written to the database around the module's rules."]));
+    }
+    return parts;
+  },
+
+  "ar-aging": asOf => aging(asOf, "ar", "customer"),
+  "ap-aging": asOf => aging(asOf, "ap", "supplier"),
+
+  invoices: async asOf => {
+    const rows = await load(`/invoices?as_of=${asOf}`);
+    return [table(`Invoices as of ${asOf}`, [
+      { key: "invoice_number", label: "Number", get: r => r.invoice_number },
+      { key: "customer", label: "Customer", get: r => r.customer },
+      { key: "issue_date", label: "Issued", get: r => r.issue_date },
+      { key: "due_date", label: "Due", get: r => r.due_date },
+      { key: "status", label: "Status", get: statusPill },
+      { key: "total_cents", label: "Total", number: true, get: r => money(r.total_cents) },
+      { key: "outstanding_cents", label: "Outstanding", number: true, get: r => money(r.outstanding_cents) },
+    ], rows)];
+  },
+
+  bills: async asOf => {
+    const rows = await load(`/bills?as_of=${asOf}`);
+    return [table(`Bills as of ${asOf}`, [
+      { key: "bill_number", label: "Number", get: r => r.bill_number },
+      { key: "supplier", label: "Supplier", get: r => r.supplier },
+      { key: "issue_date", label: "Issued", get: r => r.issue_date },
+      { key: "due_date", label: "Due", get: r => r.due_date },
+      { key: "status", label: "Status", get: statusPill },
+      { key: "total_cents", label: "Total", number: true, get: r => money(r.total_cents) },
+      { key: "outstanding_cents", label: "Outstanding", number: true, get: r => money(r.outstanding_cents) },
+    ], rows)];
+  },
+
+  accounts: async () => {
+    const rows = await load("/accounts");
+    return [table("Chart of accounts", ACCOUNT_COLUMNS.concat([
+      { key: "role", label: "Role", get: r => r.role || "" },
+      { key: "is_active", label: "In use", get: r => (r.is_active ? "yes" : "closed") },
+    ]), rows)];
+  },
+
+  funds: async asOf => {
+    const rows = await load(`/funds?as_of=${asOf}`);
+    return [table(`Funds as of ${asOf}`, [
+      { key: "code", label: "Code", get: r => r.code },
+      { key: "name", label: "Name", get: r => r.name },
+      { key: "restriction_type", label: "Restriction", get: r => r.restriction_type },
+      { key: "available_cents", label: "Available", number: true, get: r => money(r.available_cents) },
+    ], rows)];
+  },
+
+  "fund-balances": async asOf => {
+    const report = await load(`/reports/fund-balances?as_of=${asOf}`);
+    return [table(`Fund balances as of ${report.as_of}`, [
+      { key: "code", label: "Code", get: r => r.code },
+      { key: "name", label: "Name", get: r => r.name },
+      { key: "net_assets_cents", label: "Net assets", number: true, get: r => money(r.net_assets_cents) },
+      { key: "available_cents", label: "Available", number: true, get: r => money(r.available_cents) },
+    ], report.funds)];
+  },
+};
+
+async function aging(asOf, which, party) {
+  const report = await load(`/reports/${which}-aging?as_of=${asOf}`);
+  const buckets = ["current", "1_30", "31_60", "61_90", "over_90"];
+  const labels = { current: "Not due yet", "1_30": "1-30 days", "31_60": "31-60 days",
+                   "61_90": "61-90 days", over_90: "Over 90 days" };
+  const columns = [{ key: party, label: party === "customer" ? "Customer" : "Supplier", get: r => r[party] }]
+    .concat(buckets.map(b => ({ key: b, label: labels[b], number: true, get: r => money(r[b]) })))
+    .concat([{ key: "total_cents", label: "Total", number: true, get: r => money(r.total_cents) }]);
+  const footer = {};
+  for (const key of buckets.concat(["total_cents"])) footer[key] = money(report.totals[key]);
+  const title = which === "ar" ? `Owed to us as of ${report.as_of}` : `Owed by us as of ${report.as_of}`;
+  return [table(title, columns, report[`by_${party}`], footer)];
+}
+
+function render() {
+  for (const button of document.querySelectorAll("#tabs button")) {
+    button.setAttribute("aria-current", String(button.dataset.view === current));
+  }
+  panel.replaceChildren(el("p", {}, ["Loading..."]));
+  Promise.resolve(VIEWS[current](asOfInput.value))
+    .then(parts => panel.replaceChildren(...parts))
+    .catch(error => panel.replaceChildren(el("p", { class: "problem" }, [String(error.message || error)])));
+}
+
+document.getElementById("tabs").replaceChildren(...TABS.map(([view, label]) => {
+  const button = el("button", { type: "button" }, [label]);
+  button.dataset.view = view;
+  button.addEventListener("click", () => { current = view; render(); });
+  return button;
+}));
+
+asOfInput.value = new Date().toISOString().slice(0, 10);
+asOfInput.addEventListener("change", render);
+render();
+</script>
+</body>
+</html>
