@@ -18,6 +18,8 @@ modules/accounting/
   migrate.py             versioned migrations + automatic backup (usable by any module)
   migrations/0001_ledger.sql
   migrations/0002_sales_and_purchases.sql
+  migrations/0003_document_entries.sql
+  migrations/0004_fund_accounting.sql
   api.py                 FastAPI router, /accounting/... (local dev only, see below)
   frontend/index.html    read-only dashboard at /accounting/ui
   demo_cafe.py           walkthrough for a small cafe
@@ -127,6 +129,13 @@ All five read the journal, so they agree with it by construction.
 | `balance_sheet(as_of)` | assets = liabilities + equity + profit so far | balance-sheet accounts, plus `retained_earnings_cents` (income − expenses up to `as_of`), which is what makes it balance |
 | `ar_aging(as_of)` | who owes us what, by how late | per invoice and per customer, in buckets `current`, `1_30`, `31_60`, `61_90`, `over_90` |
 | `ap_aging(as_of)` | what we owe, by how late | the same, per bill and per supplier |
+| `fund_balances(as_of)` | net assets per fund | sums journal lines by fund and account type |
+| `statement_of_activities(from_date, to_date)` | income and expenses split by donor restriction | unrestricted funds vs restricted funds in separate columns |
+
+`trial_balance`, `profit_and_loss` and `balance_sheet` accept an optional
+`fund_id`: totals with no filter match the whole-business reports (every line
+tags to the default **General** unrestricted fund after migration, so existing
+databases behave the same until restricted funds are used).
 
 The agings are **as the books stood on `as_of`**: a document counts if its own
 entry is dated on or before `as_of` and its void (if any) came later, and its
@@ -134,6 +143,32 @@ outstanding amount is the total less the payments dated on or before `as_of`. So
 each aging total equals the balance of its control account on that date — a test
 asserts it at five different dates. Drafts never appear (they aren't in the
 books), and the day a document falls due it is still `current`.
+
+### Fund accounting
+
+Non-profits track **funds**: buckets that show whether money is unrestricted or
+donor-restricted to a purpose. Migration `0004_fund_accounting.sql` adds
+`acct_funds` and a **`fund_id` on every journal line**. Each entry must balance
+overall and **within each fund** (the database checks both). Every business
+gets a default **General** unrestricted fund (`code` `GEN`); upgrades backfill
+existing lines to it, so behaviour without restricted funds is unchanged.
+
+| restriction type | meaning |
+|---|---|
+| `unrestricted` | operating grants and spending with no donor limit |
+| `temporarily_restricted` | donor earmarked until a time or purpose is met |
+| `permanently_restricted` | donor earmarked without a release date |
+
+**Grant receipt** (`record_grant_receipt`) debits cash and credits grant income,
+both tagged to the fund, which increases its **available** balance. **Spending**
+against a restricted fund (expense debits on manual entries or bills) is
+**blocked** when it would exceed available balance
+(`InsufficientFundBalance`). **Release from restriction**
+(`release_from_restriction`) posts a four-line interfund entry that moves net
+assets from the restricted fund to unrestricted when the purpose is met. Invoices
+and bills accept an optional `fund_id`; otherwise they post to the default fund.
+
+Demo: `python -B modules/accounting/demo_nonprofit.py`.
 
 ### Hook for HR payroll
 
@@ -217,7 +252,10 @@ accounting.account / account_by_code / accounts / account_balance
 accounting.journal_entry / journal_entries
 accounting.customer / customers / supplier / suppliers
 accounting.invoice / invoices / bill / bills             # as_of= derives effective_status
+accounting.add_fund / update_fund / fund / funds / default_fund_id
+accounting.record_grant_receipt / release_from_restriction
 accounting.trial_balance / profit_and_loss / balance_sheet / ar_aging / ap_aging
+accounting.fund_balances / statement_of_activities   # optional fund_id on TB, P&L, balance sheet
 accounting.verify_schema(conn)         # raises SchemaTampered (init_db calls it)
 ```
 
@@ -356,6 +394,7 @@ python -m pytest modules/accounting/tests           # if pytest is installed
 | `test_migrations.py` | 17 | fresh, rerun, stepwise upgrade with a backup holding the old data, v1 usable alone, failing migration rolls back (keeping earlier versions of the same run), numbering rules, a newer database refused, sharing a database with HR's and logistics' tables, a 4-thread migration race, concurrent migrators taking one backup, in-memory, schema-tamper detection, every date CHECK refusing impossible days on any SQLite version, every money column INTEGER and capped |
 | `test_api.py` | 20 | every endpoint, 404/409/422/503 mapping, `Idempotency-Key` required and replayed, strict JSON types (no `"100"`→100 or `true`→1), empty bodies on send/receive, too-big numbers, length limits on bodies, header, query and path, a vanished database, a tampered schema, `main.py` mounting the router and the UI only when enabled and never in production, the UI never building HTML from a string, and every command being reachable over HTTP |
 | `test_cafe_walkthrough.py` | 3 | the demo end to end against figures worked out by hand, and replaying it writes nothing |
+| `test_funds.py` | 7 | per-fund balancing, grants, overspend blocking, release, migration backfill, reports |
 
 "Raw" tests write SQL directly, bypassing `accounting.py`, so anything they see
 rejected is rejected by the database itself.

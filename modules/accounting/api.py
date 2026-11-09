@@ -116,7 +116,8 @@ def _call(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except accounting.NotFound as e:
         raise HTTPException(404, str(e))
-    except (accounting.IdempotencyConflict, accounting.InvalidState, accounting.Unbalanced) as e:
+    except (accounting.IdempotencyConflict, accounting.InvalidState, accounting.Unbalanced,
+            accounting.InsufficientFundBalance) as e:
         raise HTTPException(409, f"{type(e).__name__}: {e}")
     except ValueError as e:
         raise HTTPException(422, str(e))
@@ -143,6 +144,7 @@ LongText = Annotated[str, Field(max_length=accounting.MAX_LONG_TEXT)]
 Date = Annotated[str, Field(max_length=10)]
 AccountType = Literal["asset", "liability", "equity", "income", "expense"]
 Status = Literal["draft", "sent", "paid", "void", "overdue"]
+FundRestriction = Literal["unrestricted", "temporarily_restricted", "permanently_restricted"]
 
 
 def _lines(models) -> list[dict]:
@@ -168,6 +170,7 @@ class JournalLine(_Body):
     account_code: Optional[Text] = None
     debit_cents: Optional[int] = None
     credit_cents: Optional[int] = None
+    fund_id: Optional[int] = None
     memo: Optional[LongText] = None
 
 
@@ -209,6 +212,41 @@ class DocumentLine(_Body):
     account_code: Optional[Text] = None
 
 
+class NewFund(_Body):
+    code: Text
+    name: Text
+    restriction_type: FundRestriction
+    purpose_description: Optional[LongText] = None
+    grantor: Optional[Text] = None
+    start_date: Optional[Date] = None
+    end_date: Optional[Date] = None
+
+
+class FundChanges(_Body):
+    changes: dict
+
+
+class GrantReceipt(_Body):
+    fund_id: int
+    entry_date: Date
+    amount_cents: int
+    cash_account_id: int
+    revenue_account_id: int
+    memo: LongText
+    grantor: Optional[Text] = None
+    source_ref: Optional[Text] = None
+
+
+class FundRelease(_Body):
+    from_fund_id: int
+    amount_cents: int
+    entry_date: Date
+    memo: LongText
+    donor_restricted_account_id: int
+    unrestricted_net_assets_account_id: int
+    clearing_account_id: int
+
+
 class NewInvoice(_Body):
     customer_id: int
     invoice_number: Text
@@ -217,6 +255,7 @@ class NewInvoice(_Body):
     due_date: Optional[Date] = None
     terms: Optional[LongText] = None
     notes: Optional[LongText] = None
+    fund_id: Optional[int] = None
 
 
 class NewBill(_Body):
@@ -227,6 +266,7 @@ class NewBill(_Body):
     due_date: Optional[Date] = None
     terms: Optional[LongText] = None
     notes: Optional[LongText] = None
+    fund_id: Optional[int] = None
 
 
 class Posting(_Body):
@@ -277,6 +317,45 @@ def update_account(account_id: int, body: AccountChanges, key: str = Depends(_ke
 @router.get("/accounts/{account_id}/balance")
 def account_balance(account_id: int, as_of: Optional[str] = Query(None, max_length=10), conn=Depends(get_conn)):
     return _call(accounting.account_balance, conn, account_id, as_of=as_of)
+
+
+# ---------------------------------------------------------------- funds
+
+@router.get("/funds")
+def list_funds(active_only: bool = False, as_of: Optional[str] = Query(None, max_length=10),
+               conn=Depends(get_conn)):
+    return _call(accounting.funds, conn, active_only=active_only, as_of=as_of)
+
+
+@router.post("/funds", status_code=201)
+def add_fund(body: NewFund, key: str = Depends(_key), conn=Depends(get_conn)):
+    return _call(accounting.add_fund, conn, key, body.code, body.name, body.restriction_type,
+                 purpose_description=body.purpose_description, grantor=body.grantor,
+                 start_date=body.start_date, end_date=body.end_date)
+
+
+@router.get("/funds/{fund_id}")
+def get_fund(fund_id: int, as_of: Optional[str] = Query(None, max_length=10), conn=Depends(get_conn)):
+    return _call(accounting.fund, conn, fund_id, as_of=as_of)
+
+
+@router.patch("/funds/{fund_id}")
+def update_fund(fund_id: int, body: FundChanges, key: str = Depends(_key), conn=Depends(get_conn)):
+    return _call(accounting.update_fund, conn, fund_id, body.changes, key)
+
+
+@router.post("/funds/grant-receipt", status_code=201)
+def record_grant_receipt(body: GrantReceipt, key: str = Depends(_key), conn=Depends(get_conn)):
+    return _call(accounting.record_grant_receipt, conn, key, body.fund_id, body.entry_date, body.amount_cents,
+                 body.cash_account_id, body.revenue_account_id, body.memo, grantor=body.grantor,
+                 source_ref=body.source_ref)
+
+
+@router.post("/funds/release-from-restriction", status_code=201)
+def release_from_restriction(body: FundRelease, key: str = Depends(_key), conn=Depends(get_conn)):
+    return _call(accounting.release_from_restriction, conn, key, body.from_fund_id, body.amount_cents,
+                 body.entry_date, body.memo, body.donor_restricted_account_id,
+                 body.unrestricted_net_assets_account_id, body.clearing_account_id)
 
 
 # ---------------------------------------------------------------- the journal
@@ -366,7 +445,8 @@ def list_invoices(customer_id: Optional[int] = None, status: Optional[Status] = 
 @router.post("/invoices", status_code=201)
 def create_invoice(body: NewInvoice, key: str = Depends(_key), conn=Depends(get_conn)):
     return _call(accounting.create_invoice, conn, key, body.customer_id, body.invoice_number, body.issue_date,
-                 _lines(body.lines), due_date=body.due_date, terms=body.terms, notes=body.notes)
+                 _lines(body.lines), due_date=body.due_date, terms=body.terms, notes=body.notes,
+                 fund_id=body.fund_id)
 
 
 @router.get("/invoices/{invoice_id}")
@@ -405,7 +485,8 @@ def list_bills(supplier_id: Optional[int] = None, status: Optional[Status] = Non
 @router.post("/bills", status_code=201)
 def create_bill(body: NewBill, key: str = Depends(_key), conn=Depends(get_conn)):
     return _call(accounting.create_bill, conn, key, body.supplier_id, body.bill_number, body.issue_date,
-                 _lines(body.lines), due_date=body.due_date, terms=body.terms, notes=body.notes)
+                 _lines(body.lines), due_date=body.due_date, terms=body.terms, notes=body.notes,
+                 fund_id=body.fund_id)
 
 
 @router.get("/bills/{bill_id}")
@@ -434,19 +515,31 @@ def void_bill(bill_id: int, body: Void, key: str = Depends(_key), conn=Depends(g
 
 @router.get("/reports/trial-balance")
 def trial_balance(as_of: Optional[str] = Query(None, max_length=10), include_empty: bool = False,
-                  conn=Depends(get_conn)):
-    return _call(accounting.trial_balance, conn, as_of=as_of, include_empty=include_empty)
+                  fund_id: Optional[int] = None, conn=Depends(get_conn)):
+    return _call(accounting.trial_balance, conn, as_of=as_of, include_empty=include_empty, fund_id=fund_id)
 
 
 @router.get("/reports/profit-and-loss")
 def profit_and_loss(from_date: str = Query(..., max_length=10), to_date: str = Query(..., max_length=10),
-                    conn=Depends(get_conn)):
-    return _call(accounting.profit_and_loss, conn, from_date, to_date)
+                    fund_id: Optional[int] = None, conn=Depends(get_conn)):
+    return _call(accounting.profit_and_loss, conn, from_date, to_date, fund_id=fund_id)
 
 
 @router.get("/reports/balance-sheet")
-def balance_sheet(as_of: Optional[str] = Query(None, max_length=10), conn=Depends(get_conn)):
-    return _call(accounting.balance_sheet, conn, as_of=as_of)
+def balance_sheet(as_of: Optional[str] = Query(None, max_length=10), fund_id: Optional[int] = None,
+                  conn=Depends(get_conn)):
+    return _call(accounting.balance_sheet, conn, as_of=as_of, fund_id=fund_id)
+
+
+@router.get("/reports/fund-balances")
+def fund_balances(as_of: Optional[str] = Query(None, max_length=10), conn=Depends(get_conn)):
+    return _call(accounting.fund_balances, conn, as_of=as_of)
+
+
+@router.get("/reports/statement-of-activities")
+def statement_of_activities(from_date: str = Query(..., max_length=10), to_date: str = Query(..., max_length=10),
+                            conn=Depends(get_conn)):
+    return _call(accounting.statement_of_activities, conn, from_date, to_date)
 
 
 @router.get("/reports/ar-aging")

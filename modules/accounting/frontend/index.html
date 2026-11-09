@@ -60,6 +60,8 @@ const TABS = [
   ["invoices", "Invoices"],
   ["bills", "Bills"],
   ["accounts", "Chart of accounts"],
+  ["funds", "Funds"],
+  ["fund-balances", "Fund balances"],
 ];
 
 const panel = document.getElementById("panel");
@@ -215,6 +217,26 @@ const VIEWS = {
       { key: "role", label: "Role", get: r => r.role || "" },
       { key: "is_active", label: "In use", get: r => (r.is_active ? "yes" : "closed") },
     ]), rows)];
+  },
+
+  funds: async asOf => {
+    const rows = await load(`/funds?as_of=${asOf}`);
+    return [table(`Funds as of ${asOf}`, [
+      { key: "code", label: "Code", get: r => r.code },
+      { key: "name", label: "Name", get: r => r.name },
+      { key: "restriction_type", label: "Restriction", get: r => r.restriction_type },
+      { key: "available_cents", label: "Available", number: true, get: r => money(r.available_cents) },
+    ], rows)];
+  },
+
+  "fund-balances": async asOf => {
+    const report = await load(`/reports/fund-balances?as_of=${asOf}`);
+    return [table(`Fund balances as of ${report.as_of}`, [
+      { key: "code", label: "Code", get: r => r.code },
+      { key: "name", label: "Name", get: r => r.name },
+      { key: "net_assets_cents", label: "Net assets", number: true, get: r => money(r.net_assets_cents) },
+      { key: "available_cents", label: "Available", number: true, get: r => money(r.available_cents) },
+    ], report.funds)];
   },
 };
 

@@ -122,6 +122,9 @@ DEBIT_TYPES = ("asset", "expense")
 # never be mistaken for one of theirs.
 MANUAL_SOURCES = ("manual", "payroll")
 DOCUMENT_STATUSES = ("draft", "sent", "paid", "void")
+FUND_RESTRICTION_TYPES = ("unrestricted", "temporarily_restricted", "permanently_restricted")
+# Restriction types that count as "with donor restrictions" on the statement of activities.
+RESTRICTED_FUND_TYPES = ("temporarily_restricted", "permanently_restricted")
 # Fields add_customer / add_supplier take, and update_customer / update_supplier may change.
 PARTY_FIELDS = ("name", "email", "phone", "billing_address", "payment_terms_days", "terms", "notes")
 UPDATABLE_PARTY_FIELDS = PARTY_FIELDS + ("is_active",)
@@ -147,6 +150,10 @@ class InvalidState(AccountingError):
 
 class Unbalanced(AccountingError):
     """The lines of a journal entry don't have debits equal to credits."""
+
+
+class InsufficientFundBalance(AccountingError):
+    """A restricted fund does not have enough available balance for the spending requested."""
 
 
 class SchemaTampered(AccountingError):
@@ -335,6 +342,233 @@ def update_account(conn, account_id: int, changes: dict, idempotency_key: str) -
     return _run(conn, idempotency_key, "update_account", payload, work)
 
 
+# ---------------------------------------------------------------- funds
+
+def add_fund(conn, idempotency_key: str, code: str, name: str, restriction_type: str,
+             purpose_description: str | None = None, grantor: str | None = None,
+             start_date: str | None = None, end_date: str | None = None,
+             notes: str | None = None) -> dict:
+    """Adds a fund. Returns fund().
+
+    restriction_type is unrestricted, temporarily_restricted or permanently_restricted. Restricted
+    funds track donor-imposed limits; spending that would exceed the fund's available balance is
+    refused. The default General fund is created by migration and is the only fund with is_default.
+    """
+    code = _clean_text("code", code)
+    name = _clean_text("name", name)
+    if restriction_type not in FUND_RESTRICTION_TYPES:
+        raise ValueError(f"restriction_type must be one of {', '.join(FUND_RESTRICTION_TYPES)}, "
+                         f"got {restriction_type!r}")
+    if restriction_type == "unrestricted":
+        raise ValueError("the unrestricted fund is created automatically; add a restricted fund instead")
+    if start_date is not None:
+        _date("start_date", start_date)
+    if end_date is not None:
+        _date("end_date", end_date)
+    if start_date is not None and end_date is not None and end_date < start_date:
+        raise ValueError(f"end_date {end_date} is before start_date {start_date}")
+    purpose_description = (None if purpose_description is None
+                           else _clean_text("purpose_description", purpose_description, MAX_LONG_TEXT))
+    grantor = None if grantor is None else _clean_text("grantor", grantor)
+
+    def work():
+        taken = conn.execute("SELECT id FROM acct_funds WHERE code = ?", (code,)).fetchone()
+        if taken:
+            raise InvalidState(f"fund code {code!r} is already fund {taken['id']}")
+        taken = conn.execute("SELECT id FROM acct_funds WHERE lower(name) = lower(?)", (name,)).fetchone()
+        if taken:
+            raise InvalidState(f"fund name {name!r} is already fund {taken['id']}")
+        fund_id = conn.execute("""INSERT INTO acct_funds (code, name, restriction_type, purpose_description,
+                                                          grantor, start_date, end_date, idempotency_key)
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                               (code, name, restriction_type, purpose_description, grantor, start_date,
+                                end_date, idempotency_key)).lastrowid
+        return fund(conn, fund_id)
+
+    payload = {"code": code, "name": name, "restriction_type": restriction_type,
+               "purpose_description": purpose_description, "grantor": grantor,
+               "start_date": start_date, "end_date": end_date}
+    return _run(conn, idempotency_key, "add_fund", payload, work)
+
+
+def update_fund(conn, fund_id: int, changes: dict, idempotency_key: str) -> dict:
+    """Changes a fund's name, purpose, grantor, dates or is_active. Returns fund()."""
+    _positive_int("fund_id", fund_id)
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("changes must be a non-empty dict of fields")
+    allowed = ("name", "purpose_description", "grantor", "start_date", "end_date", "is_active")
+    unknown = set(changes) - set(allowed)
+    if unknown:
+        raise ValueError(f"these fields can't be updated: {', '.join(sorted(unknown))}")
+    clean = {}
+    if "name" in changes:
+        clean["name"] = _clean_text("name", changes["name"])
+    for field in ("purpose_description", "grantor"):
+        if field in changes:
+            clean[field] = (None if changes[field] is None
+                            else _clean_text(field, changes[field], MAX_LONG_TEXT))
+    for field in ("start_date", "end_date"):
+        if field in changes:
+            if changes[field] is None:
+                clean[field] = None
+            else:
+                _date(field, changes[field])
+                clean[field] = changes[field]
+    if "is_active" in changes:
+        _bool("is_active", changes["is_active"])
+        clean["is_active"] = int(changes["is_active"])
+
+    def work():
+        current = _fund_row(conn, fund_id)
+        if "name" in clean:
+            taken = conn.execute("SELECT id FROM acct_funds WHERE lower(name) = lower(?) AND id <> ?",
+                                 (clean["name"], fund_id)).fetchone()
+            if taken:
+                raise InvalidState(f"fund name {clean['name']!r} is already fund {taken['id']}")
+        if not any(current[k] != v for k, v in clean.items()):
+            raise ValueError(f"nothing changes for fund {fund_id}")
+        if current["is_default"] and clean.get("is_active") == 0:
+            raise InvalidState("the default unrestricted fund stays active")
+        sets = ", ".join(f"{k} = ?" for k in clean)
+        conn.execute(f"UPDATE acct_funds SET {sets} WHERE id = ?", list(clean.values()) + [fund_id])
+        return fund(conn, fund_id)
+
+    payload = {"fund_id": fund_id, "changes": clean}
+    return _run(conn, idempotency_key, "update_fund", payload, work)
+
+
+def fund(conn, fund_id: int, as_of: str | None = None) -> dict:
+    """One fund with its balance on as_of (today by default)."""
+    row = _fund_row(conn, fund_id)
+    return _fund_dict(conn, row, as_of)
+
+
+def funds(conn, active_only: bool = False, as_of: str | None = None) -> list[dict]:
+    """Every fund, ordered by code."""
+    _bool("active_only", active_only)
+    sql = "SELECT * FROM acct_funds"
+    if active_only:
+        sql += " WHERE is_active = 1"
+    return [_fund_dict(conn, r, as_of) for r in conn.execute(sql + " ORDER BY code")]
+
+
+def _funds_enabled(conn) -> bool:
+    """True after migration 0004 (fund accounting tables exist)."""
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'acct_funds'"
+                             ).fetchone())
+
+
+def default_fund_id(conn) -> int:
+    """The id of the default unrestricted fund (always present after migration 0004)."""
+    if not _funds_enabled(conn):
+        raise InvalidState("fund accounting is not enabled on this database yet: run init_db()")
+    row = conn.execute("SELECT id FROM acct_funds WHERE is_default = 1").fetchone()
+    if row is None:
+        raise InvalidState("this business has no default fund yet: run init_db()")
+    return row["id"]
+
+
+def record_grant_receipt(conn, idempotency_key: str, fund_id: int, entry_date: str, amount_cents: int,
+                        cash_account_id: int, revenue_account_id: int, memo: str,
+                        grantor: str | None = None, source_ref: str | None = None) -> dict:
+    """Records a grant into a fund: debit cash, credit grant revenue, both tagged to the fund.
+
+    Returns journal_entry(). Restricted grants increase the fund's available balance for spending.
+    """
+    _positive_int("fund_id", fund_id)
+    _date("entry_date", entry_date)
+    _cents("amount_cents", amount_cents)
+    _positive_int("cash_account_id", cash_account_id)
+    _positive_int("revenue_account_id", revenue_account_id)
+    memo = _clean_text("memo", memo, MAX_LONG_TEXT)
+    if grantor is not None:
+        grantor = _clean_text("grantor", grantor)
+    if source_ref is not None:
+        source_ref = _clean_text("source_ref", source_ref)
+    lines = [{"account_id": cash_account_id, "debit_cents": amount_cents, "fund_id": fund_id},
+             {"account_id": revenue_account_id, "credit_cents": amount_cents, "fund_id": fund_id}]
+
+    def work():
+        fund_row = _fund_row(conn, fund_id)
+        if not fund_row["is_active"]:
+            raise InvalidState(f"fund {fund_id} is not active")
+        cash = _account_row(conn, cash_account_id)
+        revenue = _account_row(conn, revenue_account_id)
+        if cash["account_type"] != "asset" or not cash["is_active"]:
+            raise InvalidState(f"account {cash['code']} must be an active asset account for the cash")
+        if revenue["account_type"] != "income" or not revenue["is_active"]:
+            raise InvalidState(f"account {revenue['code']} must be an active income account for the grant")
+        resolved = []
+        for line in lines:
+            row = _resolve_line(conn, line, types=("asset",) if line.get("debit_cents") else ("income",))
+            row["fund_id"] = fund_id
+            resolved.append(row)
+        entry_id = _insert_entry(conn, entry_date, memo, "grant_receipt", source_ref, resolved, idempotency_key)
+        return journal_entry(conn, entry_id)
+
+    payload = {"fund_id": fund_id, "entry_date": entry_date, "amount_cents": amount_cents,
+               "cash_account_id": cash_account_id, "revenue_account_id": revenue_account_id,
+               "memo": memo, "grantor": grantor, "source_ref": source_ref}
+    return _run(conn, idempotency_key, "record_grant_receipt", payload, work)
+
+
+def release_from_restriction(conn, idempotency_key: str, from_fund_id: int, amount_cents: int,
+                             entry_date: str, memo: str, donor_restricted_account_id: int,
+                             unrestricted_net_assets_account_id: int, clearing_account_id: int) -> dict:
+    """Moves net assets from a restricted fund to unrestricted when the donor's purpose is met.
+
+    Posts one entry balanced per fund: the restricted fund credits donor-restricted net assets and
+    debits an interfund clearing account; the unrestricted fund credits that clearing account and
+    debits unrestricted net assets. Returns journal_entry().
+    """
+    _positive_int("from_fund_id", from_fund_id)
+    _cents("amount_cents", amount_cents)
+    _date("entry_date", entry_date)
+    memo = _clean_text("memo", memo, MAX_LONG_TEXT)
+    _positive_int("donor_restricted_account_id", donor_restricted_account_id)
+    _positive_int("unrestricted_net_assets_account_id", unrestricted_net_assets_account_id)
+    _positive_int("clearing_account_id", clearing_account_id)
+
+    def work():
+        from_fund = _fund_row(conn, from_fund_id)
+        if from_fund["restriction_type"] == "unrestricted":
+            raise InvalidState(f"fund {from_fund_id} is unrestricted; only a restricted fund can be released from")
+        if not from_fund["is_active"]:
+            raise InvalidState(f"fund {from_fund_id} is not active")
+        to_fund = default_fund_id(conn)
+        available = _fund_available_balance(conn, from_fund_id, entry_date)
+        if amount_cents > available:
+            raise InsufficientFundBalance(f"fund {from_fund['code']} has {available} cents available, "
+                                          f"can't release {amount_cents} cents")
+        donor = _account_row(conn, donor_restricted_account_id)
+        unrestricted = _account_row(conn, unrestricted_net_assets_account_id)
+        clearing = _account_row(conn, clearing_account_id)
+        if donor["account_type"] != "equity" or unrestricted["account_type"] != "equity":
+            raise InvalidState("donor_restricted and unrestricted_net_assets must be equity accounts")
+        if clearing["account_type"] not in ("equity", "liability"):
+            raise InvalidState("clearing_account must be an equity or liability interfund account")
+        lines = [
+            {"account_id": donor_restricted_account_id, "credit_cents": amount_cents, "fund_id": from_fund_id},
+            {"account_id": clearing_account_id, "debit_cents": amount_cents, "fund_id": from_fund_id},
+            {"account_id": clearing_account_id, "credit_cents": amount_cents, "fund_id": to_fund},
+            {"account_id": unrestricted_net_assets_account_id, "debit_cents": amount_cents, "fund_id": to_fund},
+        ]
+        resolved = []
+        for line in lines:
+            row = _resolve_line(conn, line)
+            row["fund_id"] = line["fund_id"]
+            resolved.append(row)
+        entry_id = _insert_entry(conn, entry_date, memo, "fund_release", from_fund["code"], resolved,
+                                 idempotency_key, skip_restricted_check=True)
+        return journal_entry(conn, entry_id)
+
+    payload = {"from_fund_id": from_fund_id, "amount_cents": amount_cents, "entry_date": entry_date,
+               "memo": memo, "donor_restricted_account_id": donor_restricted_account_id,
+               "unrestricted_net_assets_account_id": unrestricted_net_assets_account_id,
+               "clearing_account_id": clearing_account_id}
+    return _run(conn, idempotency_key, "release_from_restriction", payload, work)
+
+
 # ---------------------------------------------------------------- the journal
 
 def post_journal_entry(conn, idempotency_key: str, entry_date: str, memo: str, lines: list[dict],
@@ -359,7 +593,17 @@ def post_journal_entry(conn, idempotency_key: str, entry_date: str, memo: str, l
     prepared = _check_lines(lines)
 
     def work():
-        resolved = [_resolve_line(conn, line) for line in prepared]
+        resolved = []
+        funds_on = _funds_enabled(conn)
+        default_fund = default_fund_id(conn) if funds_on else None
+        for line in prepared:
+            merged = _resolve_line(conn, line)
+            if funds_on:
+                if "fund_id" in line:
+                    merged["fund_id"] = line["fund_id"]
+                else:
+                    merged["fund_id"] = default_fund
+            resolved.append(merged)
         entry_id = _insert_entry(conn, entry_date, memo, source, source_ref, resolved, idempotency_key)
         return journal_entry(conn, entry_id)
 
@@ -447,7 +691,7 @@ def update_supplier(conn, supplier_id: int, changes: dict, idempotency_key: str)
 
 def create_invoice(conn, idempotency_key: str, customer_id: int, invoice_number: str, issue_date: str,
                    lines: list[dict], due_date: str | None = None, terms: str | None = None,
-                   notes: str | None = None) -> dict:
+                   notes: str | None = None, fund_id: int | None = None) -> dict:
     """Raises a draft invoice. Returns invoice(). Nothing is posted to the books until send_invoice().
 
     lines is a list of at least one dict: 'description', 'quantity' (a whole number of units),
@@ -467,12 +711,18 @@ def create_invoice(conn, idempotency_key: str, customer_id: int, invoice_number:
         _date("due_date", due_date)
     terms = None if terms is None else _clean_text("terms", terms, MAX_LONG_TEXT)
     notes = None if notes is None else _clean_text("notes", notes, MAX_LONG_TEXT)
+    if fund_id is not None:
+        _positive_int("fund_id", fund_id)
     prepared = _check_document_lines(lines)
 
     def work():
         party = _party_row(conn, "customer", customer_id)
         if not party["is_active"]:
             raise InvalidState(f"customer {customer_id} is not active")
+        if fund_id is not None:
+            fund_row = _fund_row(conn, fund_id)
+            if not fund_row["is_active"]:
+                raise InvalidState(f"fund {fund_id} is not active")
         taken = conn.execute("SELECT id FROM acct_invoices WHERE invoice_number = ?", (invoice_number,)).fetchone()
         if taken:
             raise InvalidState(f"invoice number {invoice_number!r} is already invoice {taken['id']}")
@@ -481,11 +731,11 @@ def create_invoice(conn, idempotency_key: str, customer_id: int, invoice_number:
             raise ValueError(f"due_date {falls_due} is before the issue date {issue_date}")
         invoice_id = _insert_document(conn, "invoice", prepared, idempotency_key, party_id=customer_id,
                                       number=invoice_number, issue_date=issue_date, due_date=falls_due,
-                                      terms=terms, notes=notes)
+                                      terms=terms, notes=notes, fund_id=fund_id)
         return invoice(conn, invoice_id)
 
     payload = {"customer_id": customer_id, "invoice_number": invoice_number, "issue_date": issue_date,
-               "due_date": due_date, "terms": terms, "notes": notes, "lines": prepared}
+               "due_date": due_date, "terms": terms, "notes": notes, "lines": prepared, "fund_id": fund_id}
     return _run(conn, idempotency_key, "create_invoice", payload, work)
 
 
@@ -530,7 +780,7 @@ def void_invoice(conn, invoice_id: int, reason: str, idempotency_key: str, entry
 
 def create_bill(conn, idempotency_key: str, supplier_id: int, bill_number: str, issue_date: str,
                 lines: list[dict], due_date: str | None = None, terms: str | None = None,
-                notes: str | None = None) -> dict:
+                notes: str | None = None, fund_id: int | None = None) -> dict:
     """Enters a draft bill from a supplier. Returns bill(). Nothing is posted until receive_bill().
 
     The mirror of create_invoice(), with two differences: a line's account is an expense account (or an
@@ -544,12 +794,18 @@ def create_bill(conn, idempotency_key: str, supplier_id: int, bill_number: str, 
         _date("due_date", due_date)
     terms = None if terms is None else _clean_text("terms", terms, MAX_LONG_TEXT)
     notes = None if notes is None else _clean_text("notes", notes, MAX_LONG_TEXT)
+    if fund_id is not None:
+        _positive_int("fund_id", fund_id)
     prepared = _check_document_lines(lines)
 
     def work():
         party = _party_row(conn, "supplier", supplier_id)
         if not party["is_active"]:
             raise InvalidState(f"supplier {supplier_id} is not active")
+        if fund_id is not None:
+            fund_row = _fund_row(conn, fund_id)
+            if not fund_row["is_active"]:
+                raise InvalidState(f"fund {fund_id} is not active")
         taken = conn.execute("SELECT id FROM acct_bills WHERE supplier_id = ? AND bill_number = ?",
                              (supplier_id, bill_number)).fetchone()
         if taken:
@@ -560,11 +816,11 @@ def create_bill(conn, idempotency_key: str, supplier_id: int, bill_number: str, 
             raise ValueError(f"due_date {falls_due} is before the issue date {issue_date}")
         bill_id = _insert_document(conn, "bill", prepared, idempotency_key, party_id=supplier_id,
                                    number=bill_number, issue_date=issue_date, due_date=falls_due,
-                                   terms=terms, notes=notes)
+                                   terms=terms, notes=notes, fund_id=fund_id)
         return bill(conn, bill_id)
 
     payload = {"supplier_id": supplier_id, "bill_number": bill_number, "issue_date": issue_date,
-               "due_date": due_date, "terms": terms, "notes": notes, "lines": prepared}
+               "due_date": due_date, "terms": terms, "notes": notes, "lines": prepared, "fund_id": fund_id}
     return _run(conn, idempotency_key, "create_bill", payload, work)
 
 
@@ -649,10 +905,19 @@ def journal_entry(conn, entry_id: int) -> dict:
     row = conn.execute("SELECT * FROM acct_journal_entries WHERE id = ?", (entry_id,)).fetchone()
     if row is None:
         raise NotFound(f"no journal entry {entry_id}")
-    lines = conn.execute("""SELECT l.line_no, l.account_id, a.code AS account_code, a.name AS account_name,
-                                   l.debit_cents, l.credit_cents, l.memo
-                            FROM acct_journal_lines l JOIN acct_accounts a ON a.id = l.account_id
-                            WHERE l.entry_id = ? ORDER BY l.line_no""", (entry_id,))
+    if _funds_enabled(conn):
+        lines = conn.execute("""SELECT l.line_no, l.account_id, a.code AS account_code, a.name AS account_name,
+                                       l.fund_id, f.code AS fund_code, f.name AS fund_name,
+                                       l.debit_cents, l.credit_cents, l.memo
+                                FROM acct_journal_lines l
+                                JOIN acct_accounts a ON a.id = l.account_id
+                                JOIN acct_funds f ON f.id = l.fund_id
+                                WHERE l.entry_id = ? ORDER BY l.line_no""", (entry_id,))
+    else:
+        lines = conn.execute("""SELECT l.line_no, l.account_id, a.code AS account_code, a.name AS account_name,
+                                       l.debit_cents, l.credit_cents, l.memo
+                                FROM acct_journal_lines l JOIN acct_accounts a ON a.id = l.account_id
+                                WHERE l.entry_id = ? ORDER BY l.line_no""", (entry_id,))
     reversed_by = conn.execute("SELECT id FROM acct_journal_entries WHERE reverses_id = ?", (entry_id,)).fetchone()
     return {"entry_id": row["id"], "entry_date": row["entry_date"], "memo": row["memo"], "source": row["source"],
             "source_ref": row["source_ref"], "total_cents": row["total_cents"], "reverses_id": row["reverses_id"],
@@ -725,7 +990,7 @@ def bills(conn, supplier_id: int | None = None, status: str | None = None, as_of
 
 # ---------------------------------------------------------------- reports
 
-def trial_balance(conn, as_of: str | None = None, include_empty: bool = False) -> dict:
+def trial_balance(conn, as_of: str | None = None, include_empty: bool = False, fund_id: int | None = None) -> dict:
     """Every account's debit and credit totals up to as_of (today by default), and the two grand totals.
 
     The grand totals are equal in a double-entry ledger, and the database makes every single entry
@@ -734,7 +999,10 @@ def trial_balance(conn, as_of: str | None = None, include_empty: bool = False) -
     """
     as_of = _as_of(as_of)
     _bool("include_empty", include_empty)
-    balances = _balances(conn, as_of)
+    if fund_id is not None:
+        _positive_int("fund_id", fund_id)
+        _fund_row(conn, fund_id)
+    balances = _balances(conn, as_of, fund_id=fund_id)
     rows = []
     for row in conn.execute("SELECT * FROM acct_accounts ORDER BY code"):
         line = balances.get(row["id"]) or _empty_balance(row)
@@ -742,11 +1010,11 @@ def trial_balance(conn, as_of: str | None = None, include_empty: bool = False) -
             rows.append(line)
     debits = sum(r["debit_cents"] for r in rows)
     credits = sum(r["credit_cents"] for r in rows)
-    return {"as_of": as_of, "rows": rows, "total_debit_cents": debits, "total_credit_cents": credits,
-            "balanced": debits == credits}
+    return {"as_of": as_of, "fund_id": fund_id, "rows": rows, "total_debit_cents": debits,
+            "total_credit_cents": credits, "balanced": debits == credits}
 
 
-def profit_and_loss(conn, from_date: str, to_date: str) -> dict:
+def profit_and_loss(conn, from_date: str, to_date: str, fund_id: int | None = None) -> dict:
     """Income less expenses over a date range, both dates inclusive, by account.
 
     Each amount is on the account's natural side: income is credits less debits (so a refund posted
@@ -756,19 +1024,22 @@ def profit_and_loss(conn, from_date: str, to_date: str) -> dict:
     _date("to_date", to_date)
     if to_date < from_date:
         raise ValueError(f"to_date {to_date} is before from_date {from_date}")
-    balances = _balances(conn, to_date, from_date=from_date)
+    if fund_id is not None:
+        _positive_int("fund_id", fund_id)
+        _fund_row(conn, fund_id)
+    balances = _balances(conn, to_date, from_date=from_date, fund_id=fund_id)
     income = [b for b in balances.values() if b["account_type"] == "income"]
     expenses = [b for b in balances.values() if b["account_type"] == "expense"]
     income.sort(key=lambda b: b["code"])
     expenses.sort(key=lambda b: b["code"])
     total_income = sum(b["balance_cents"] for b in income)
     total_expense = sum(b["balance_cents"] for b in expenses)
-    return {"from_date": from_date, "to_date": to_date, "income": income, "expenses": expenses,
-            "total_income_cents": total_income, "total_expense_cents": total_expense,
+    return {"from_date": from_date, "to_date": to_date, "fund_id": fund_id, "income": income,
+            "expenses": expenses, "total_income_cents": total_income, "total_expense_cents": total_expense,
             "net_income_cents": total_income - total_expense}
 
 
-def balance_sheet(conn, as_of: str | None = None) -> dict:
+def balance_sheet(conn, as_of: str | None = None, fund_id: int | None = None) -> dict:
     """What the business owns, owes and is worth on as_of (today by default).
 
     Nothing here closes the year into an equity account, so the profit the business has made since
@@ -777,12 +1048,15 @@ def balance_sheet(conn, as_of: str | None = None) -> dict:
     'balanced' checks.
     """
     as_of = _as_of(as_of)
-    balances = _balances(conn, as_of)
+    if fund_id is not None:
+        _positive_int("fund_id", fund_id)
+        _fund_row(conn, fund_id)
+    balances = _balances(conn, as_of, fund_id=fund_id)
     groups = {t: sorted((b for b in balances.values() if b["account_type"] == t), key=lambda b: b["code"])
               for t in ACCOUNT_TYPES}
     totals = {t: sum(b["balance_cents"] for b in groups[t]) for t in ACCOUNT_TYPES}
     retained = totals["income"] - totals["expense"]
-    return {"as_of": as_of, "assets": groups["asset"], "liabilities": groups["liability"],
+    return {"as_of": as_of, "fund_id": fund_id, "assets": groups["asset"], "liabilities": groups["liability"],
             "equity": groups["equity"], "total_assets_cents": totals["asset"],
             "total_liabilities_cents": totals["liability"], "total_equity_cents": totals["equity"],
             "retained_earnings_cents": retained,
@@ -804,6 +1078,78 @@ def ar_aging(conn, as_of: str | None = None) -> dict:
 def ap_aging(conn, as_of: str | None = None) -> dict:
     """What the business owed suppliers on as_of, by supplier and by how late it is. The mirror of ar_aging()."""
     return _aging(conn, "bill", as_of)
+
+
+def fund_balances(conn, as_of: str | None = None) -> dict:
+    """Each fund's assets, liabilities, and net assets on as_of (today by default)."""
+    as_of = _as_of(as_of)
+    rows = []
+    for fund_row in conn.execute("SELECT * FROM acct_funds WHERE is_active = 1 ORDER BY code"):
+        fid = fund_row["id"]
+        balances = _balances(conn, as_of, fund_id=fid)
+        totals = {t: sum(b["balance_cents"] for b in balances.values() if b["account_type"] == t)
+                  for t in ACCOUNT_TYPES}
+        net_assets = (totals["asset"] - totals["liability"]
+                      + totals["equity"] + totals["income"] - totals["expense"])
+        available = _fund_available_balance(conn, fid, as_of)
+        rows.append({"fund_id": fid, "code": fund_row["code"], "name": fund_row["name"],
+                     "restriction_type": fund_row["restriction_type"],
+                     "total_assets_cents": totals["asset"], "total_liabilities_cents": totals["liability"],
+                     "total_equity_cents": totals["equity"], "total_income_cents": totals["income"],
+                     "total_expense_cents": totals["expense"], "net_assets_cents": net_assets,
+                     "available_cents": available})
+    return {"as_of": as_of, "funds": rows}
+
+
+def statement_of_activities(conn, from_date: str, to_date: str) -> dict:
+    """Income and expenses in the period, split by without donor restrictions vs with them."""
+    _date("from_date", from_date)
+    _date("to_date", to_date)
+    if to_date < from_date:
+        raise ValueError(f"to_date {to_date} is before from_date {from_date}")
+    unrestricted_ids = {r["id"] for r in conn.execute(
+        "SELECT id FROM acct_funds WHERE restriction_type = 'unrestricted'")}
+    restricted_ids = {r["id"] for r in conn.execute(
+        "SELECT id FROM acct_funds WHERE restriction_type IN ('temporarily_restricted', "
+        "'permanently_restricted')")}
+    sql = """SELECT a.id, a.code, a.name, a.account_type, l.fund_id,
+                    COALESCE(SUM(l.debit_cents), 0) AS debits, COALESCE(SUM(l.credit_cents), 0) AS credits
+             FROM acct_accounts a
+             JOIN acct_journal_lines l ON l.account_id = a.id
+             JOIN acct_journal_entries e ON e.id = l.entry_id
+             WHERE a.account_type IN ('income', 'expense') AND e.entry_date BETWEEN ? AND ?
+             GROUP BY a.id, l.fund_id"""
+    buckets = {}  # account_id -> {unrestricted_cents, restricted_cents, code, name, account_type}
+    for row in conn.execute(sql, (from_date, to_date)):
+        if row["account_type"] == "income":
+            natural = row["credits"] - row["debits"]
+        else:
+            natural = row["debits"] - row["credits"]
+        if natural == 0:
+            continue
+        slot = buckets.setdefault(row["id"], {"account_id": row["id"], "code": row["code"], "name": row["name"],
+                                              "account_type": row["account_type"],
+                                              "without_restrictions_cents": 0, "with_restrictions_cents": 0})
+        if row["fund_id"] in unrestricted_ids:
+            key = "without_restrictions_cents"
+        elif row["fund_id"] in restricted_ids:
+            key = "with_restrictions_cents"
+        else:
+            key = "without_restrictions_cents"
+        slot[key] += natural
+    income_rows = sorted((b for b in buckets.values() if b["account_type"] == "income"), key=lambda x: x["code"])
+    expense_rows = sorted((b for b in buckets.values() if b["account_type"] == "expense"), key=lambda x: x["code"])
+    def _tot(rows, key):
+        return sum(r[key] for r in rows)
+    return {"from_date": from_date, "to_date": to_date, "income": income_rows, "expenses": expense_rows,
+            "total_income_without_cents": _tot(income_rows, "without_restrictions_cents"),
+            "total_income_with_cents": _tot(income_rows, "with_restrictions_cents"),
+            "total_expense_without_cents": _tot(expense_rows, "without_restrictions_cents"),
+            "total_expense_with_cents": _tot(expense_rows, "with_restrictions_cents"),
+            "net_without_cents": (_tot(income_rows, "without_restrictions_cents")
+                                  - _tot(expense_rows, "without_restrictions_cents")),
+            "net_with_cents": (_tot(income_rows, "with_restrictions_cents")
+                               - _tot(expense_rows, "with_restrictions_cents"))}
 
 
 # ---------------------------------------------------------------- internals: documents
@@ -835,7 +1181,8 @@ _KINDS = {
 }
 
 
-def _insert_document(conn, kind, lines, idempotency_key, party_id, number, issue_date, due_date, terms, notes):
+def _insert_document(conn, kind, lines, idempotency_key, party_id, number, issue_date, due_date, terms, notes,
+                     fund_id=None):
     """Writes the lines, then the document row that closes them (the database checks the total against
     the lines, exactly as it checks a journal entry against its own)."""
     k = _KINDS[kind]
@@ -852,10 +1199,17 @@ def _insert_document(conn, kind, lines, idempotency_key, party_id, number, issue
                          VALUES (?, ?, ?, ?, ?, ?, ?)""",
                      (document_id, line_no, line["description"], line["quantity"], line["unit_price_cents"],
                       line["amount_cents"], line["account_id"]))
-    conn.execute(f"""INSERT INTO {k['table']} (id, {k['party_fk']}, {k['number']}, issue_date, due_date,
-                                               total_cents, terms, notes, idempotency_key)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                 (document_id, party_id, number, issue_date, due_date, total, terms, notes, idempotency_key))
+    if _funds_enabled(conn):
+        conn.execute(f"""INSERT INTO {k['table']} (id, {k['party_fk']}, {k['number']}, issue_date, due_date,
+                                                   total_cents, terms, notes, fund_id, idempotency_key)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (document_id, party_id, number, issue_date, due_date, total, terms, notes, fund_id,
+                      idempotency_key))
+    else:
+        conn.execute(f"""INSERT INTO {k['table']} (id, {k['party_fk']}, {k['number']}, issue_date, due_date,
+                                                   total_cents, terms, notes, idempotency_key)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (document_id, party_id, number, issue_date, due_date, total, terms, notes, idempotency_key))
     return document_id
 
 
@@ -884,11 +1238,15 @@ def _post_document(conn, kind, document_id, idempotency_key, entry_date):
                               (document_id,)).fetchall()
         side = k["control_side"]
         other = "credit" if side == "debit" else "debit"
-        entry_lines = [_entry_line(control["id"], side, row["total_cents"])]
+        document_fund = None
+        if _funds_enabled(conn):
+            document_fund = row["fund_id"] if row["fund_id"] is not None else default_fund_id(conn)
+        entry_lines = [_entry_line(control["id"], side, row["total_cents"], fund_id=document_fund)]
         # A waived line (a zero price on its own account) stays on the document but is not a journal
         # line: both of a line's amounts would be 0, which the journal refuses. It adds nothing to the
         # total, so leaving it out keeps the entry balanced.
-        entry_lines += [_entry_line(s["account_id"], other, s["amount"]) for s in shares if s["amount"]]
+        entry_lines += [_entry_line(s["account_id"], other, s["amount"], fund_id=document_fund)
+                        for s in shares if s["amount"]]
         entry_id = _insert_entry(conn, dated, memo, k["source"], row[k["number"]],
                                  [_resolve_line(conn, line) for line in entry_lines], idempotency_key)
         conn.execute(f"UPDATE {k['table']} SET entry_id = ?, status = 'sent' WHERE id = ?",
@@ -933,8 +1291,11 @@ def _record_payment(conn, kind, document_id, amount_cents, payment_date, money_a
         money_side = "debit" if control_side == "credit" else "credit"
         memo = (f"{k['payment_word'].capitalize()} for "
                 f"{'invoice' if kind == 'invoice' else 'bill'} {row[k['number']]}")
-        entry_lines = [_entry_line(money["id"], money_side, amount_cents),
-                       _entry_line(control["id"], control_side, amount_cents)]
+        document_fund = None
+        if _funds_enabled(conn):
+            document_fund = row["fund_id"] if row["fund_id"] is not None else default_fund_id(conn)
+        entry_lines = [_entry_line(money["id"], money_side, amount_cents, fund_id=document_fund),
+                       _entry_line(control["id"], control_side, amount_cents, fund_id=document_fund)]
         entry_id = _insert_entry(conn, payment_date, memo, k["payment_source"], row[k["number"]],
                                  [_resolve_line(conn, line) for line in entry_lines], idempotency_key)
         conn.execute(f"""INSERT INTO {k['payments']} ({k['payment_fk']}, payment_date, amount_cents,
@@ -1041,7 +1402,9 @@ def _document_dict(conn, kind, row, as_of):
             "status": row["status"], "effective_status": _effective_status(row, as_of),
             "total_cents": row["total_cents"], "amount_paid_cents": row["amount_paid_cents"],
             "outstanding_cents": outstanding, "terms": row["terms"], "notes": row["notes"],
-            "entry_id": row["entry_id"], "void_entry_id": row["void_entry_id"], "as_of": as_of}
+            "fund_id": row["fund_id"] if "fund_id" in row.keys() else None,
+            "entry_id": row["entry_id"], "void_entry_id": row["void_entry_id"],
+            "as_of": as_of}
 
 
 def _effective_status(row, as_of) -> str:
@@ -1105,34 +1468,53 @@ def _bucket(days_late: int) -> str:
 
 # ---------------------------------------------------------------- internals: the journal
 
-def _entry_line(account_id, side, amount_cents, memo=None) -> dict:
+def _entry_line(account_id, side, amount_cents, memo=None, fund_id=None) -> dict:
     """One line of an entry the module posts itself: a debit or a credit, with the other side at zero."""
-    return {"account_id": account_id, "memo": memo,
+    line = {"account_id": account_id, "memo": memo,
             "debit_cents": amount_cents if side == "debit" else 0,
             "credit_cents": amount_cents if side == "credit" else 0}
+    if fund_id is not None:
+        line["fund_id"] = fund_id
+    return line
 
 
-def _insert_entry(conn, entry_date, memo, source, source_ref, lines, idempotency_key, reverses_id=None) -> int:
+def _insert_entry(conn, entry_date, memo, source, source_ref, lines, idempotency_key, reverses_id=None,
+                  skip_restricted_check=False) -> int:
     """Writes the lines, then the entry row that closes them. The database checks that debits equal
     credits and that both equal the total (migration 0001), so this can't leave the books unbalanced
     even if the caller's arithmetic is wrong."""
-    debits = sum(line["debit_cents"] for line in lines)
-    credits = sum(line["credit_cents"] for line in lines)
+    debits = sum(line.get("debit_cents", 0) for line in lines)
+    credits = sum(line.get("credit_cents", 0) for line in lines)
     if debits != credits:
         raise Unbalanced(f"debits ({debits} cents) must equal credits ({credits} cents)")
     if debits == 0:
         raise ValueError("a journal entry must move more than nothing")
     if debits > MAX_CENTS:
         raise ValueError(f"an entry must be at most {MAX_CENTS} cents, got {debits}")
+    funds_on = _funds_enabled(conn)
+    if funds_on:
+        # Per-fund balance before the database trigger fires, so overspend can raise a clear error.
+        _check_entry_funds_balanced(lines)
+        if not skip_restricted_check:
+            _check_restricted_fund_spending(conn, lines, entry_date)
     # The entry row comes last (see 0001), so its id is chosen here. BEGIN IMMEDIATE holds the write
     # lock, so no other writer can take it meanwhile.
     entry_id = _next_id(conn, "acct_journal_entries")
+    default_fund = default_fund_id(conn) if funds_on else None
     for line_no, line in enumerate(lines, start=1):
-        conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
-                                                        credit_cents, memo)
-                        VALUES (?, ?, ?, ?, ?, ?)""",
-                     (entry_id, line_no, line["account_id"], line["debit_cents"], line["credit_cents"],
-                      line["memo"]))
+        if funds_on:
+            fid = line.get("fund_id", default_fund)
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, fund_id, debit_cents,
+                                                            credit_cents, memo)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                     (entry_id, line_no, line["account_id"], fid, line.get("debit_cents", 0),
+                      line.get("credit_cents", 0), line.get("memo")))
+        else:
+            conn.execute("""INSERT INTO acct_journal_lines (entry_id, line_no, account_id, debit_cents,
+                                                            credit_cents, memo)
+                            VALUES (?, ?, ?, ?, ?, ?)""",
+                         (entry_id, line_no, line["account_id"], line.get("debit_cents", 0),
+                          line.get("credit_cents", 0), line.get("memo")))
     conn.execute("""INSERT INTO acct_journal_entries (id, entry_date, memo, source, source_ref, total_cents,
                                                       reverses_id, idempotency_key)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -1156,16 +1538,23 @@ def _insert_reversal(conn, entry_id, idempotency_key, entry_date=None, memo=None
     if already:
         raise InvalidState(f"entry {entry_id} was already reversed by entry {already['id']}; "
                            f"reverse entry {already['id']} instead")
-    lines = conn.execute("""SELECT l.line_no, l.account_id, l.debit_cents, l.credit_cents, l.memo, a.code,
-                                   a.is_active
-                            FROM acct_journal_lines l JOIN acct_accounts a ON a.id = l.account_id
-                            WHERE l.entry_id = ? ORDER BY l.line_no""", (entry_id,)).fetchall()
+    cols = "l.line_no, l.account_id, l.debit_cents, l.credit_cents, l.memo, a.code, a.is_active"
+    if _funds_enabled(conn):
+        cols = "l.line_no, l.account_id, l.fund_id, l.debit_cents, l.credit_cents, l.memo, a.code, a.is_active"
+    lines = conn.execute(f"""SELECT {cols}
+                             FROM acct_journal_lines l JOIN acct_accounts a ON a.id = l.account_id
+                             WHERE l.entry_id = ? ORDER BY l.line_no""", (entry_id,)).fetchall()
     closed = [line["code"] for line in lines if not line["is_active"]]
     if closed:
         raise InvalidState(f"entry {entry_id} posts to closed account(s) {', '.join(closed)}: "
                            f"reopen them before reversing it")
-    mirrored = [{"account_id": line["account_id"], "debit_cents": line["credit_cents"],
-                 "credit_cents": line["debit_cents"], "memo": line["memo"]} for line in lines]
+    mirrored = []
+    for line in lines:
+        m = {"account_id": line["account_id"], "debit_cents": line["credit_cents"],
+             "credit_cents": line["debit_cents"], "memo": line["memo"]}
+        if "fund_id" in line.keys():
+            m["fund_id"] = line["fund_id"]
+        mirrored.append(m)
     return _insert_entry(conn, entry_date or original["entry_date"],
                          memo or f"Reversal of entry {entry_id}: {original['memo']}",
                          original["source"], original["source_ref"], mirrored, idempotency_key,
@@ -1183,17 +1572,22 @@ def _check_lines(lines) -> list[dict]:
     for i, line in enumerate(lines, start=1):
         if not isinstance(line, dict):
             raise ValueError(f"line {i} must be a dict, got {line!r}")
-        unknown = set(line) - {"account_id", "account_code", "debit_cents", "credit_cents", "memo"}
+        unknown = set(line) - {"account_id", "account_code", "debit_cents", "credit_cents", "memo", "fund_id"}
         if unknown:
             raise ValueError(f"line {i} has unknown fields: {', '.join(sorted(unknown))}")
+        if line.get("fund_id") is not None:
+            _positive_int(f"line {i} fund_id", line["fund_id"])
         debit = line.get("debit_cents") or 0
         credit = line.get("credit_cents") or 0
         if bool(debit) == bool(credit):
             raise ValueError(f"line {i} must be a debit or a credit, not both and not nothing")
         _cents("debit_cents" if debit else "credit_cents", debit or credit)
-        out.append({**_line_account(i, line), "debit_cents": debit, "credit_cents": credit,
-                    "memo": None if line.get("memo") is None else _clean_text(f"line {i} memo", line["memo"],
-                                                                             MAX_LONG_TEXT)})
+        cleaned = {**_line_account(i, line), "debit_cents": debit, "credit_cents": credit,
+                   "memo": None if line.get("memo") is None else _clean_text(f"line {i} memo", line["memo"],
+                                                                            MAX_LONG_TEXT)}
+        if line.get("fund_id") is not None:
+            cleaned["fund_id"] = line["fund_id"]
+        out.append(cleaned)
     return out
 
 
@@ -1282,9 +1676,9 @@ def _account_dict(conn, row, balances=None) -> dict:
     return balances.get(row["id"]) or _empty_balance(row)
 
 
-def _balances(conn, as_of, from_date=None) -> dict:
+def _balances(conn, as_of, from_date=None, fund_id=None) -> dict:
     """{account_id: balance row} for every account with a journal line in the range. One query, so a
-    report never walks the accounts one at a time."""
+    report never walks the accounts one at a time. fund_id limits to one fund's tags."""
     sql = """SELECT a.id, a.code, a.name, a.account_type, a.role, a.is_active,
                     COALESCE(SUM(l.debit_cents), 0) AS debits, COALESCE(SUM(l.credit_cents), 0) AS credits
              FROM acct_accounts a
@@ -1292,6 +1686,10 @@ def _balances(conn, as_of, from_date=None) -> dict:
              JOIN acct_journal_entries e ON e.id = l.entry_id
              WHERE 1 = 1"""
     args = []
+    if fund_id is not None:
+        if not _funds_enabled(conn):
+            raise InvalidState("fund_id filter needs migration 0004")
+        sql, args = sql + " AND l.fund_id = ?", args + [fund_id]
     if as_of is not None:
         sql, args = sql + " AND e.entry_date <= ?", args + [as_of]
     if from_date is not None:
@@ -1311,6 +1709,83 @@ def _empty_balance(row) -> dict:
     return {"account_id": row["id"], "code": row["code"], "name": row["name"],
             "account_type": row["account_type"], "role": row["role"], "is_active": bool(row["is_active"]),
             "debit_cents": 0, "credit_cents": 0, "balance_cents": 0}
+
+
+def _fund_row(conn, fund_id):
+    _lookup_id("fund", fund_id)
+    row = conn.execute("SELECT * FROM acct_funds WHERE id = ?", (fund_id,)).fetchone()
+    if row is None:
+        raise NotFound(f"no fund {fund_id}")
+    return row
+
+
+def _fund_dict(conn, row, as_of=None) -> dict:
+    as_of = _as_of(as_of)
+    return {"fund_id": row["id"], "code": row["code"], "name": row["name"],
+            "restriction_type": row["restriction_type"], "purpose_description": row["purpose_description"],
+            "grantor": row["grantor"], "start_date": row["start_date"], "end_date": row["end_date"],
+            "is_active": bool(row["is_active"]), "is_default": bool(row["is_default"]),
+            "available_cents": _fund_available_balance(conn, row["id"], as_of)}
+
+
+def _fund_available_balance(conn, fund_id, as_of) -> int:
+    """How much a restricted fund can still spend: grant income and equity credits less expenses already posted."""
+    fund_row = _fund_row(conn, fund_id)
+    if fund_row["restriction_type"] == "unrestricted":
+        return MAX_CENTS
+    sql = """SELECT a.account_type, COALESCE(SUM(l.debit_cents), 0) AS debits,
+                    COALESCE(SUM(l.credit_cents), 0) AS credits
+             FROM acct_journal_lines l
+             JOIN acct_journal_entries e ON e.id = l.entry_id
+             JOIN acct_accounts a ON a.id = l.account_id
+             WHERE l.fund_id = ? AND e.entry_date <= ?
+             GROUP BY a.account_type"""
+    income = expense = equity_in = 0
+    for row in conn.execute(sql, (fund_id, as_of)):
+        if row["account_type"] == "income":
+            income += row["credits"] - row["debits"]
+        elif row["account_type"] == "expense":
+            expense += row["debits"] - row["credits"]
+        elif row["account_type"] == "equity":
+            equity_in += row["credits"] - row["debits"]
+    return income + equity_in - expense
+
+
+def _check_entry_funds_balanced(lines) -> None:
+    by_fund = {}
+    for line in lines:
+        fid = line.get("fund_id")
+        if fid is None:
+            continue
+        bucket = by_fund.setdefault(fid, {"debit": 0, "credit": 0})
+        bucket["debit"] += line.get("debit_cents", 0)
+        bucket["credit"] += line.get("credit_cents", 0)
+    for fid, totals in by_fund.items():
+        if totals["debit"] != totals["credit"]:
+            raise Unbalanced(f"fund {fid}: debits ({totals['debit']}) must equal credits ({totals['credit']})")
+
+
+def _check_restricted_fund_spending(conn, lines, entry_date) -> None:
+    """Refuses expense or asset debits that would spend more than a restricted fund holds."""
+    default_fund = default_fund_id(conn)
+    pending = {}  # fund_id -> extra expense debits in this entry
+    account_types = {}
+    for line in lines:
+        fid = line.get("fund_id", default_fund)
+        if not line.get("debit_cents"):
+            continue
+        if line["account_id"] not in account_types:
+            account_types[line["account_id"]] = _account_row(conn, line["account_id"])["account_type"]
+        if account_types[line["account_id"]] == "expense":
+            pending[fid] = pending.get(fid, 0) + line.get("debit_cents", 0)
+    for fid, extra in pending.items():
+        fund_row = _fund_row(conn, fid)
+        if fund_row["restriction_type"] == "unrestricted":
+            continue
+        available = _fund_available_balance(conn, fid, entry_date)
+        if extra > available:
+            raise InsufficientFundBalance(f"fund {fund_row['code']} has {available} cents available, "
+                                          f"this entry spends {extra} cents")
 
 
 # ---------------------------------------------------------------- internals: customers and suppliers
