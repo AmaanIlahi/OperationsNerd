@@ -3,11 +3,14 @@ Environment configuration for the agentic CRM and the startup checks.
 
     APP_ENV=production        turns on the strict startup checks below
     DATABASE_PATH             SQLite file (default: db/operations_nerd.db next to the code)
-    LLM_PROVIDER              gemini (default) | anthropic | stub
+    LLM_PROVIDER              gemini (default) | anthropic | baseten | stub
     GEMINI_API_KEY            required in production when LLM_PROVIDER=gemini
     GEMINI_MODEL              optional (see gemini_llm.py)
     ANTHROPIC_API_KEY         required in production when LLM_PROVIDER=anthropic
     ANTHROPIC_MODEL           optional (see anthropic_llm.py)
+    BASETEN_API_KEY           required in production when LLM_PROVIDER=baseten
+    BASETEN_MODEL             optional, default openai/gpt-oss-120b
+    BASETEN_BASE_URL          optional trusted HTTPS Baseten /v1 endpoint
     SIGNUP_INVITE_CODE        signup is refused unless this is set and matches (or ALLOW_OPEN_SIGNUP=1)
     SESSION_SECRET            required in production, at least 32 characters
     PORT                      read by the process that starts uvicorn (see Dockerfile)
@@ -118,6 +121,13 @@ def check_environment() -> list[str]:
             if key_env and not os.environ.get(key_env):
                 problems.append(f"{key_env} is required when APP_ENV=production "
                                 f"(LLM_PROVIDER={llm.get_provider()})")
+            if llm.get_provider() == "baseten":
+                from agentic import baseten_llm
+                try:
+                    baseten_llm.get_endpoint()
+                    baseten_llm.get_model()
+                except llm.LLMError as error:
+                    problems.append(str(error))
         if os.environ.get("CONFIG_AGENT_ENABLED", "").strip():
             problems.append("CONFIG_AGENT_ENABLED must not be set when APP_ENV=production "
                             "(it writes files into the pack folders)")
@@ -130,6 +140,9 @@ def startup():
     problems = check_environment()
     if problems:
         raise ConfigError("Refusing to start:\n" + "\n".join(f"  - {p}" for p in problems))
-    directory = os.path.dirname(os.path.abspath(d.DB_PATH))
-    os.makedirs(directory, exist_ok=True)
-    d.init_db(d.DB_PATH)
+    if not os.getenv("OPERATIONS_DATABASE_URL"):
+        directory = os.path.dirname(os.path.abspath(d.DB_PATH))
+        os.makedirs(directory, exist_ok=True)
+    d.init_db()
+    from umbrella.businesses import initialize_registry
+    initialize_registry()

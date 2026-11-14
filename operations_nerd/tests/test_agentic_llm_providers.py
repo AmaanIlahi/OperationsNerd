@@ -92,7 +92,7 @@ def test_default_provider_is_gemini_and_invalid_is_rejected():
         try:
             llm.get_provider()
         except LLMError as e:
-            assert "gemini, anthropic, stub" in str(e)
+            assert "gemini, anthropic, baseten, stub" in str(e)
         else:
             raise AssertionError("unknown provider accepted")
 
