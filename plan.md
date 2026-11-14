@@ -15,7 +15,7 @@ local planning draft remains `../OperationsNerd_next_steps_plan_2026-11-12.md`.
 - One authenticated session, business picker, configurable CRM, assistant and
   schema history. Core-generated entity, field and link keys remain permanent.
 - Accounts/sessions/chat usage/routing in a control DB; each business has its
-  own PostgreSQL database with `core`, `logistics`, `hr` and `accounting` schemas.
+  own PostgreSQL database with `core` and the schemas of its enabled modules.
 - Independently keyed common Employee/Customer/Location types, extended by the
   selected business template. Modules reuse core identity through reviewed maps.
 - Trusted package discovery and common role, lifecycle, command and workspace
@@ -55,18 +55,22 @@ local planning draft remains `../OperationsNerd_next_steps_plan_2026-11-12.md`.
 | Fund-accounting corrections | Net assets counted once; capital consumes restricted capacity; permanent release refused; temporary release reduces capacity; backdates recheck later balances |
 | HR | Core employees/locations, employment history, hire/update/termination/rehire, exact half-day leave/accrual/holds, shifts and onboarding |
 | Local recovery | Checksum migrations, failed-business setup retry, backup before capability install and verified isolated restore rehearsal |
-| Schema-aware assistant | Baseten guide/context implemented and live tested; schema changes remain proposals; no SQL, banking or operational execution tools |
+| Schema-aware hosted assistant | Baseten guide/context implemented and live tested; schema changes remain proposals; no operational execution tools. Local inference remains open |
 | All-module toy demo | Real browser covers one named toy business with all three modules enabled; money, HR and cross-module/business isolation checked |
 | Carrier/buyer experimental drafts | PR6/PR7 ETA normalization and fork-only basket planner remain unmerged/unported; current workflow uses explicit quotes/manual tracking |
 | Educational materials | All eight requested text-first scripts prepared; local browser recordings are evidence, not published translated videos |
 
 ## Verification
 
-- **25/25 offline test scripts passed**, covering the core, legacy SQLite,
+- **26/26 offline test scripts passed**, covering the core, legacy SQLite,
   authentication, schema/chat behavior, provider errors and WSGI guards. Real-model
   smoke is excluded from the offline runner; PG tests run separately below.
-- **115 PostgreSQL tests passed**, six groups: foundation 8, purchasing/stock 52,
-  host/lifecycle 16, HTTP/import/recovery/support 21, HR 10 and Accounting 8.
+- **117 PostgreSQL tests passed**, six groups: foundation 8, purchasing/stock 52,
+  host/lifecycle 16, HTTP/import/recovery/support 23, HR 10 and Accounting 8.
+- A follow-up to Harsh's independent verification fixes PostgreSQL 14 tools
+  overriding the local PostgreSQL 16 tools. Six tooling tests and two additional
+  real backup/recovery cases cover version selection and stopping before DDL.
+  The original 25-script/115-PG checkpoint remains the baseline he verified.
 - HTTP tests exercise real routes and PG transactions on newly created disposable
   databases. The runner creates its own local cluster and never loads `.env`.
 - An independent 16-case scope/malformed-input audit passed. Wrong owners,
@@ -104,6 +108,12 @@ bought or bank transfers executed. The WSGI oversized-body test now sends header
 first to verify the pre-existing early 413 contract without a client BrokenPipe.
 
 ## Next work
+
+The immediate project order is **integration, module videos, then local AI**.
+The local manual purchase-to-shipment loop works, but the wider integration is
+partial: quote recommendations, consolidated shortage review, variants/category
+rules, destination validation and advanced stock controls need work. The exact
+outline status is in [logistics_outline_status.md](documentation/logistics_outline_status.md).
 
 1. Review the adapters and pinned baselines with their module owners. Agree on
    operational amendment policy, deployment ownership and release responsibilities.

@@ -83,7 +83,7 @@ stock engine, host adapter, actual HTTP workflows, CSV, reports, recovery, HR
 and Accounting using its own
 isolated connection settings. Model calls are stubbed in both suites.
 
-The final verification checkpoint passed **25 offline scripts** and **115
+The current verification checkpoint passed **26 offline scripts** and **117
 PostgreSQL tests**. Real desktop/mobile browser workflows and live Baseten
 checks are described in [plan.md](plan.md). Local evidence is kept in ignored
 `.local/verification/`; credentials, business data and videos are not committed.

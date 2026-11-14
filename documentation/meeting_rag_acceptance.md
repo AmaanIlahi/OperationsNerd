@@ -28,7 +28,7 @@ It does not turn an unanswered email question into an agreed requirement.
 | `New York University Mail - LogisticsNerd: splitting the work.pdf` | Purchasing and stock/receiving/shipping ownership; integration through explicit contracts | Reused purchasing/stock engine with provenance; host adapters only bind core identity. No wholesale teammate branch merge. |
 | `My OperationsNerd branches what each one is for.pdf` | Branch purpose and ownership; avoid treating experimental work as the main baseline | Main pinned at `4ac00e6`; Logistics source pinned at `b16b622`; module provenance files record adapted source. |
 | `New York University Mail - My branch notes (attached) and a few things to settle.pdf` | PostgreSQL/SQLite distinction; event-derived stock; full delivery transaction; explicit links and replay | Native PG tests cover whole-delivery rollback, concurrent last quantities, immutable movements, shared request keys and terminal delivered state. SQLite core compatibility is tested separately. |
-| `New York University Mail - the inventory problem.pdf` | Reserve existing stock before buying shortage; split suppliers/receipts/shipments; no double allocation | Domain tests include fifteen chairs across sources, partial receipts, competing reservations and two shipments. Purchases add no physical stock. |
+| `New York University Mail - the inventory problem.pdf` | Product variety through configurable typed attributes; schema-aware guidance for onboarding and daily work; no autonomous actions | Custom typed fields and current-schema workflow guidance work. Baseten is the provider selected in this chat; local inference is not implemented. Category-dependent required fields, variants and a shared stock mapping across separate category types remain open. |
 | `New York University Mail - OperationsNerd update: agentic CRM demo, benchmark, and next steps.pdf` | Unified agentic core; owner-approved configuration; private business databases/common records; named toy-store demo; practical reports; HR/accounting progress; accounting corrections; schema-aware workflow support | Shared session/schema history, mapped modules, distinct generated business DBs, reports, HR and explicit Accounting workflows. Four known fund failures have regression coverage. Assistant uses current schema and enabled-module guides. Benchmark/research claims are not inferred from functional passes. |
 | `New York University Mail - Re: OperationsNerd.pdf` | Conservative carrier ETA normalization; combined PR6/PR7 offline evidence; fork-only multi-item buyer-plan draft; explicit merge pause | These independent drafts are not ported or merged here. The integrated workflow uses explicit supplier quotes and manual tracking. Live provider normalization and basket planning remain separate roadmap work; the email's test counts are historical claims, not results from this fork. |
 | `New York University Mail - OperationsNerd paper and video.pdf` | Educational prototype with major security/business-specific gaps; overview and separate module videos of no more than three minutes; text before translation | Text scripts in `demo_scripts.md`, real browser evidence and local screen recordings where produced. Reviewed narration, translation, publication and final paper remain deliverables. |
@@ -67,7 +67,10 @@ those changes are recorded as part of this implementation, not hidden as a
 successful frozen-baseline experiment.
 
 The following remain explicit roadmap/release items: the unmerged carrier ETA
-guards and standalone basket planner; a customer-selected legacy
+guards and standalone basket planner; category-dependent required fields and
+variant rules; complete owner-facing batch/recall, damage/count correction,
+return and gift-set workflows (some lot/recall functions exist only in the native
+engine); a customer-selected legacy
 data migration with reconciliation; live registry cutover/rollback and off-device
 control/business backup policy; hosted database provisioning; live carrier/label
 integration; independent review of adapted HR/accounting behavior; final paper,
