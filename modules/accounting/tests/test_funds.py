@@ -139,6 +139,35 @@ def test_reports_without_fund_filter_unchanged_and_statement_of_activities():
     assert len(fbs["funds"]) >= 2
 
 
+def test_permanently_restricted_funds_cannot_be_released():
+    conn, _ = with_chart("perm_release")
+    unres, restricted, clearing, grant_rev, _ = equity_pair(conn)
+    endow = a.add_fund(conn, "end", "ENDW", "Endowment", "permanently_restricted")["fund_id"]
+    bank = a.account_by_code(conn, "1000")["account_id"]
+    a.record_grant_receipt(conn, "g-end", endow, "2026-01-15", 100_000, bank, grant_rev, "Endowment")
+    rejected(lambda: a.release_from_restriction(conn, "rel", endow, 50_000, "2026-06-01", "Nope",
+                                                restricted, unres, clearing),
+             "permanently restricted", a.InvalidState)
+
+
+def test_capital_asset_spending_counts_against_restricted_available():
+    conn, _ = with_chart("cap_spend")
+    _, _, _, grant_rev, expense = equity_pair(conn)
+    forest = a.add_fund(conn, "cap:fund", "FRST", "Forest", "temporarily_restricted")["fund_id"]
+    capital = a.add_account(conn, "cap:acct", "1500", "Equipment", "asset")["account_id"]
+    bank = a.account_by_code(conn, "1000")["account_id"]
+    a.record_grant_receipt(conn, "g", forest, "2026-01-10", 100_000, bank, grant_rev, "Grant")
+    a.post_journal_entry(conn, "cap", "2026-02-01", "Buy mower", [
+        {"account_id": capital, "debit_cents": 60_000, "fund_id": forest},
+        {"account_code": "1000", "credit_cents": 60_000, "fund_id": forest},
+    ])
+    assert a.fund(conn, forest, as_of=AS_OF)["available_cents"] == 40_000
+    rejected(lambda: a.post_journal_entry(conn, "over", "2026-02-02", "Too much kit", [
+        {"account_id": capital, "debit_cents": 50_000, "fund_id": forest},
+        {"account_code": "1000", "credit_cents": 50_000, "fund_id": forest},
+    ]), "has 40000 cents available", a.InsufficientFundBalance)
+
+
 def test_reversal_keeps_fund_ids():
     conn, _ = with_chart("rev_fund")
     gen = a.default_fund_id(conn)

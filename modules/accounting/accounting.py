@@ -533,6 +533,9 @@ def release_from_restriction(conn, idempotency_key: str, from_fund_id: int, amou
         from_fund = _fund_row(conn, from_fund_id)
         if from_fund["restriction_type"] == "unrestricted":
             raise InvalidState(f"fund {from_fund_id} is unrestricted; only a restricted fund can be released from")
+        if from_fund["restriction_type"] == "permanently_restricted":
+            raise InvalidState(f"fund {from_fund['code']} is permanently restricted; only temporary restrictions "
+                               f"can be released from")
         if not from_fund["is_active"]:
             raise InvalidState(f"fund {from_fund_id} is not active")
         to_fund = default_fund_id(conn)
@@ -1496,7 +1499,7 @@ def _insert_entry(conn, entry_date, memo, source, source_ref, lines, idempotency
         # Per-fund balance before the database trigger fires, so overspend can raise a clear error.
         _check_entry_funds_balanced(lines)
         if not skip_restricted_check:
-            _check_restricted_fund_spending(conn, lines, entry_date)
+            _check_restricted_fund_spending(conn, lines, entry_date, source)
     # The entry row comes last (see 0001), so its id is chosen here. BEGIN IMMEDIATE holds the write
     # lock, so no other writer can take it meanwhile.
     entry_id = _next_id(conn, "acct_journal_entries")
@@ -1728,6 +1731,21 @@ def _fund_dict(conn, row, as_of=None) -> dict:
             "available_cents": _fund_available_balance(conn, row["id"], as_of)}
 
 
+def _fund_capital_spent(conn, fund_id, as_of) -> int:
+    """Net debits on non-cash asset accounts (capital purchases charged to a restricted fund)."""
+    bank = conn.execute("SELECT id FROM acct_accounts WHERE code = '1000'").fetchone()
+    bank_id = bank["id"] if bank else -1
+    rows = conn.execute("""SELECT COALESCE(SUM(l.debit_cents), 0) AS debits,
+                                  COALESCE(SUM(l.credit_cents), 0) AS credits
+                           FROM acct_journal_lines l
+                           JOIN acct_journal_entries e ON e.id = l.entry_id
+                           JOIN acct_accounts a ON a.id = l.account_id
+                           WHERE l.fund_id = ? AND e.entry_date <= ? AND a.account_type = 'asset'
+                                 AND a.id <> ? AND a.role IS NULL
+                           GROUP BY a.id""", (fund_id, as_of, bank_id))
+    return sum(max(0, row["debits"] - row["credits"]) for row in rows)
+
+
 def _fund_available_balance(conn, fund_id, as_of) -> int:
     """How much a restricted fund can still spend: grant income and equity credits less expenses already posted."""
     fund_row = _fund_row(conn, fund_id)
@@ -1748,7 +1766,7 @@ def _fund_available_balance(conn, fund_id, as_of) -> int:
             expense += row["debits"] - row["credits"]
         elif row["account_type"] == "equity":
             equity_in += row["credits"] - row["debits"]
-    return income + equity_in - expense
+    return income + equity_in - expense - _fund_capital_spent(conn, fund_id, as_of)
 
 
 def _check_entry_funds_balanced(lines) -> None:
@@ -1765,18 +1783,26 @@ def _check_entry_funds_balanced(lines) -> None:
             raise Unbalanced(f"fund {fid}: debits ({totals['debit']}) must equal credits ({totals['credit']})")
 
 
-def _check_restricted_fund_spending(conn, lines, entry_date) -> None:
+def _check_restricted_fund_spending(conn, lines, entry_date, source=None) -> None:
     """Refuses expense or asset debits that would spend more than a restricted fund holds."""
+    if source == "grant_receipt":
+        return
     default_fund = default_fund_id(conn)
     pending = {}  # fund_id -> extra expense debits in this entry
     account_types = {}
+    bank = conn.execute("SELECT id FROM acct_accounts WHERE code = '1000'").fetchone()
+    bank_id = bank["id"] if bank else None
+    count_asset = source in ("manual", "bill")
     for line in lines:
         fid = line.get("fund_id", default_fund)
         if not line.get("debit_cents"):
             continue
         if line["account_id"] not in account_types:
-            account_types[line["account_id"]] = _account_row(conn, line["account_id"])["account_type"]
-        if account_types[line["account_id"]] == "expense":
+            row = _account_row(conn, line["account_id"])
+            account_types[line["account_id"]] = (row["account_type"], row["role"])
+        kind, role = account_types[line["account_id"]]
+        capital_debit = (count_asset and kind == "asset" and line["account_id"] != bank_id and role is None)
+        if kind == "expense" or capital_debit:
             pending[fid] = pending.get(fid, 0) + line.get("debit_cents", 0)
     for fid, extra in pending.items():
         fund_row = _fund_row(conn, fid)
