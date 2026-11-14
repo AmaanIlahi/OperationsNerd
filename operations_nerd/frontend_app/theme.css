@@ -1,0 +1,153 @@
+/* Adapted from the user's LogisticsNerd styles.css, business.css, purchasing.css
+   and demo-navigation.css. Asset sources and license: assets/README.md. */
+@font-face {
+  font-family: 'DM Sans Variable';
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url('/app/assets/dm-sans-latin-wght-normal.woff2') format('woff2');
+}
+:root {
+  color-scheme: light;
+  --bg: #f7f7f2; --panel: #fffefa; --text: #293c35; --muted: #667368;
+  --line: #e5e8df; --accent: #153f36; --accent-text: #eff6e9;
+  --danger: #934532; --danger-bg: #fff2e8; --ok: #4d713e; --ok-bg: #edf4e3;
+  --warn: #875c37; --warn-bg: #faf3e7; --user-bubble: #edf2dd;
+  --ink: #243d33; --green: #153f36; --lime: #d9eb84; --surface: #fffefa;
+}
+body { font-family: 'DM Sans Variable', 'DM Sans', sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; font-synthesis: none; }
+[hidden] { display: none !important; }
+button, input, select, textarea { font: inherit; -webkit-tap-highlight-color: transparent; }
+button, a, input, select, textarea { outline-offset: 4px; }
+:focus-visible { outline: 3px solid #94b044; }
+button { border-radius: 8px; padding: 10px 15px; font-size: 12px; font-weight: 560; min-height: 36px; background: var(--surface); transition: background 140ms, border-color 140ms; }
+button:hover:not(:disabled) { border-color: #b8c892; background: #f2f6e7; }
+button.primary { background: var(--green); color: #eff6e9; box-shadow: 0 3px 7px #153f3610; }
+button.primary:hover:not(:disabled) { background: #24574b; border-color: #24574b; }
+button:disabled { opacity: .55; cursor: default; }
+input, select, textarea { border-color: #dce2d6; border-radius: 8px; background: #fbfcf7; padding: 10px 12px; min-width: 0; color: var(--ink); font-size: 13px; }
+input:focus, select:focus, textarea:focus { border-color: #8ca56b; background: #fff; }
+input::placeholder, textarea::placeholder { color: #899580; }
+header { max-width: 1480px; min-height: 92px; margin: 0 auto; padding: 18px 32px; gap: 14px; background: transparent; border-bottom: 1px solid var(--line); }
+header select { background: var(--surface); max-width: 240px; min-width: 155px; }
+header nav { gap: 5px; }
+header nav button { border-color: transparent; background: transparent; color: #64716a; }
+header nav button.primary { background: #e8efcf; color: var(--green); box-shadow: none; }
+header nav button.primary:hover:not(:disabled) { background: #e0eac0; border-color: transparent; }
+header > .muted { font-size: 11px; overflow-wrap: anywhere; }
+.app-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--green); font-size: 23px; letter-spacing: -1.1px; font-weight: 760; white-space: nowrap; margin-right: 8px; }
+.app-brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--green); color: var(--lime); font-size: 23px; font-weight: 700; letter-spacing: -2px; padding-right: 2px; }
+.app-brand-light { font-weight: 420; }
+.app-brand-dot { color: #88a043; }
+main { max-width: 1480px; margin: 0 auto; padding: 26px 32px 32px; gap: 22px; height: calc(100vh - 92px); grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr); }
+.pane, .card { border-radius: 16px; border-color: #e4e8df; padding: 24px; box-shadow: 0 5px 24px #213f2b04, 0 1px 3px #213f2b03; }
+.pane h2 { font-size: 27px; font-weight: 550; letter-spacing: -.65px; color: #203e31; }
+.pane > .row:first-child { margin-bottom: 14px; }
+.pane > p { line-height: 1.75; }
+.tabs { border-color: #e1e6d8; gap: 5px; margin: 15px 0; }
+.tab { font-size: 12px; color: #64716a; padding: 10px 12px; min-height: 39px; }
+.tab.active { color: var(--green); border-bottom-color: var(--green); font-weight: 650; }
+.table-wrap { margin-top: 15px; }
+table { font-size: 12px; line-height: 1.6; }
+th { font-size: 10px; letter-spacing: .8px; color: #667368; font-weight: 550; }
+th, td { padding: 12px 10px; border-color: var(--line); }
+td { overflow-wrap: anywhere; }
+.form { padding: 20px; border-radius: 12px; background: #fafbf5; border-color: #e1e6d7; margin: 18px 0; }
+.form h3 { font-size: 17px; font-weight: 550; margin-bottom: 16px; }
+.form .field { margin-bottom: 15px; }
+.form .field > label, .card label { color: #526047; font-size: 12px; font-weight: 570; margin-bottom: 7px; }
+.form .field > .muted { font-size: 11px; margin-top: 6px; }
+.error, .notice, .warn { border: 1px solid transparent; border-radius: 9px; padding: 13px 16px; line-height: 1.65; font-size: 13px; overflow-wrap: anywhere; }
+.error { border-color: #e9cdb8; }
+.notice { border-color: #c8d6ae; }
+.warn { border-color: #e9dcc4; }
+.badge { padding: 4px 9px; font-size: 10px; font-weight: 550; letter-spacing: .1px; }
+.badge.ok { background: #edf1e4; color: #547146; }
+.bubble { padding: 12px 14px; border-radius: 12px; font-size: 13px; line-height: 1.7; }
+.proposal { border-color: #b8c892; background: #fafbf5; padding: 16px; border-radius: 11px; }
+.proposal h3 { color: var(--green); }
+.proposal li { margin-block: 9px; }
+.proposal .impact { font-size: 12px; }
+#chat-pane { padding: 21px; }
+#chat-pane .row button { padding: 6px 10px; font-size: 11px; }
+#chat-form { border-top: 1px solid var(--line); padding-top: 15px; margin-top: 12px; }
+#chat-form textarea { min-height: 74px; }
+#chat-form button { min-height: 42px; }
+.center { max-width: 440px; margin-top: 10vh; }
+.center h1 { font-size: 42px; line-height: 1.1; letter-spacing: -1.8px; font-weight: 500; color: #203e31; }
+.center > p { line-height: 1.75; color: #778176; margin: 16px 0 25px; }
+.center .card { padding: 26px; }
+.versions li { border-radius: 10px; padding: 13px; }
+.versions li.selected { border-color: #aabe7d; background: #f0f5df; }
+.spec-entity { padding: 14px; border-radius: 11px; }
+
+/* Logistics uses the same panel and step vocabulary as the original workflow. */
+main.logistics-wide #crm-pane { padding: 30px; }
+.logistics-head { padding-bottom: 24px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+.logistics-kicker { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 1.7px; font-weight: 650; color: #70815b; margin-bottom: 12px; }
+.logistics-head h2 { font-size: clamp(34px, 4vw, 46px); font-weight: 500; letter-spacing: -1.8px; line-height: 1.12; }
+.logistics-head p { font-size: 13px; margin-top: 10px; }
+.logistics-head > .badge { margin-top: 18px; }
+.logistics-stat { background: #f0f3e8; border: 1px solid #e0e6d5; border-radius: 12px; min-width: 125px; padding: 14px 18px; color: #647553; font-size: 11px; }
+.logistics-stat strong { font-size: 27px; font-weight: 500; letter-spacing: -.6px; color: #344c36; margin-bottom: 3px; }
+.logistics-tabs { padding: 18px 0; margin: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); gap: 10px 24px; }
+.logistics-tabs .tab { display: inline-flex; align-items: center; gap: 10px; border: 0; padding: 3px 0; color: #738161; }
+.logistics-tabs .tab.active { color: var(--green); }
+.logistics-tab-number { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #e2e6dc; border-radius: 50%; background: #f3f4ee; font-size: 10px; font-weight: 550; }
+.logistics-tabs .tab.active .logistics-tab-number { background: #e7efc4; border-color: #c0d278; box-shadow: 0 0 0 3px #f0f4e4; }
+.logistics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.logistics-card { border-color: #e4e8df; border-radius: 14px; padding: 24px; background: var(--surface); margin-bottom: 20px; }
+.logistics-card h3 { font-size: 21px; letter-spacing: -.4px; font-weight: 550; margin-bottom: 19px; }
+.logistics-card th, .logistics-card td { white-space: nowrap; }
+.logistics-field { font-size: 12px; color: #526047; font-weight: 570; margin-bottom: 15px; }
+.logistics-field > input, .logistics-field > select { margin-top: 7px; }
+.logistics-field small { color: #6f7e5b; font-size: 10px; margin-top: 6px; line-height: 1.5; }
+.logistics-form-grid { gap: 0 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.logistics-mapping { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.logistics-mapping fieldset { background: #fafbf5; padding: 18px; border-color: #e1e6d7; border-radius: 12px; }
+.logistics-mapping legend { font-size: 14px; font-weight: 600; padding: 0 7px; color: var(--green); }
+.logistics-actions { margin-top: 20px; }
+.logistics-download { display: inline-flex; align-items: center; border: 1px solid #dce2d6; border-radius: 8px; padding: 10px 15px; color: var(--green); background: #f0f4e7; text-decoration: none; font-size: 12px; font-weight: 550; }
+.logistics-download:hover { background: #e5edd7; }
+.logistics-csv-source { width: 100%; min-height: 230px; font: 12px/1.7 ui-monospace, monospace; overflow: auto; }
+.logistics-settings { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 18px; }
+.logistics-settings > summary { cursor: pointer; color: #667368; font-size: 12px; }
+.logistics-settings > p { line-height: 1.7; font-size: 12px; }
+.logistics-reference-wide { grid-template-columns: minmax(0, 1fr); }
+.module-line { padding: 18px; margin: 14px 0; border: 1px solid #e1e6d7; border-radius: 10px; background: #fafbf5; min-width: 0; }
+.module-line legend { padding: 0 6px; color: #647553; font-size: 12px; }
+@media (max-width: 1120px) {
+  header { gap: 10px; padding-inline: 24px; }
+  .app-brand { font-size: 21px; margin-right: 0; }
+  header select { min-width: 140px; max-width: 180px; }
+  header nav { order: 3; width: 100%; }
+  main { height: calc(100vh - 135px); padding: 22px 24px; }
+  .logistics-mapping { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); height: auto; }
+  #chat-pane { height: 65vh; }
+}
+@media (max-width: 640px) {
+  header { padding: 18px 16px 12px; gap: 10px; }
+  .app-brand { font-size: 20px; }
+  .app-brand-mark { width: 29px; height: 29px; font-size: 20px; }
+  header > .muted { max-width: 200px; margin-left: auto; }
+  header select { flex: 1; min-width: 130px; max-width: 100%; }
+  header > button { padding: 8px 10px; }
+  main { padding: 18px 12px 28px; gap: 18px; }
+  .pane, main.logistics-wide #crm-pane { padding: 18px; border-radius: 14px; }
+  .logistics-grid, .logistics-mapping, .logistics-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .logistics-card { padding: 18px; }
+  .logistics-tabs { gap: 15px 20px; }
+  .logistics-tabs .tab { font-size: 11px; gap: 7px; }
+  .logistics-tab-number { width: 26px; height: 26px; }
+  .logistics-stat { min-width: 95px; flex: 1; padding: 11px 12px; }
+  .logistics-stat strong { font-size: 23px; }
+  .logistics-head { padding-bottom: 18px; }
+  .form { padding: 15px; }
+  th, td { padding: 10px 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+}
