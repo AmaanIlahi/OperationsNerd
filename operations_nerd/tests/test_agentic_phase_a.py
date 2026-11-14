@@ -26,7 +26,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "0"
 d.init_db(reset=True)
 
 PASSWORD = "correct horse battery"
-TEMPLATES = ["health_club", "real_estate"]
+TEMPLATES = ["health_club", "real_estate", "toy_store"]
 
 
 def new_client(base_url="http://testserver") -> TestClient:

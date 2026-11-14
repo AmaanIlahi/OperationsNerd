@@ -36,6 +36,13 @@ app.include_router(agentic_router)
 app.include_router(health_router)
 app.add_middleware(BodyLimitMiddleware)
 
+# The umbrella host selects a private database only after session ownership is
+# resolved. Default SQLite mode retains the existing agentic CRM behavior.
+from umbrella.businesses import BusinessRoutingMiddleware
+from umbrella.routes import router as umbrella_router
+app.include_router(umbrella_router)
+app.add_middleware(BusinessRoutingMiddleware)
+
 # Mounted at /ui, not /, so it never conflicts with API routes like
 # /businesses or /packs/{pack_id}/questionnaire.
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
@@ -57,7 +64,8 @@ if os.environ.get("CONFIG_AGENT_ENABLED") == "1":
 # not scoped to an account, so they are dropped from the route table when
 # APP_ENV=production. Local development keeps them. Done here, after
 # everything is mounted, so the legacy route files stay untouched.
-if agentic_config.is_production():
+from umbrella.businesses import enabled as umbrella_enabled
+if agentic_config.is_production() or umbrella_enabled():
     _legacy_routers = (questionnaire_router, state_router, pipeline_router, approval_router)
     _legacy_paths = {r.path for router in _legacy_routers for r in router.routes} | {"/ui", "/agent"}
 

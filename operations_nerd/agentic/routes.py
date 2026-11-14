@@ -49,7 +49,7 @@ def signup(payload: SignupRequest, request: Request, response: Response):
         raise HTTPException(status_code=422, detail=problem)
 
     password_hash = auth.hash_password(payload.password)
-    with d.get_conn() as conn:
+    with d.control_conn() as conn:
         try:
             account_id = store.create_account(conn, email, password_hash)
         except store.EmailTaken:
@@ -63,7 +63,7 @@ def signup(payload: SignupRequest, request: Request, response: Response):
 def login(payload: LoginRequest, request: Request, response: Response):
     email = auth.normalize_email(payload.email)
     limits.check_login(auth.client_ip(request), email)
-    with d.get_conn() as conn:
+    with d.control_conn() as conn:
         account = store.get_account_by_email(conn, email)
         ok = auth.verify_password(payload.password, account["password_hash"] if account else None)
         if not ok:
@@ -79,7 +79,7 @@ def login(payload: LoginRequest, request: Request, response: Response):
 def logout(request: Request, response: Response):
     token = request.cookies.get(auth.SESSION_COOKIE)
     if token:
-        with d.get_conn() as conn:
+        with d.control_conn() as conn:
             auth.delete_session(conn, token)
     auth.clear_session_cookie(request, response)
     return {"ok": True}
@@ -116,6 +116,9 @@ def create_business(payload: CreateBusinessRequest, request: Request):
         # Templates are validated at startup, so this is a server bug, not a client error.
         raise HTTPException(status_code=500, detail="Generated spec failed validation: " + "; ".join(issues))
 
+    from umbrella import businesses as umbrella_businesses
+    if umbrella_businesses.enabled():
+        return umbrella_businesses.provision(account["id"], name, payload.template, spec)
     with d.get_conn() as conn:
         business_id = store.create_business_with_version_1(
             conn, account["id"], name, payload.template, spec
@@ -127,6 +130,9 @@ def create_business(payload: CreateBusinessRequest, request: Request):
 @router.get("/businesses")
 def list_businesses(request: Request):
     account = auth.current_account(request)
+    from umbrella import businesses as umbrella_businesses
+    if umbrella_businesses.enabled():
+        return umbrella_businesses.list_owned(account["id"])
     with d.get_conn() as conn:
         return store.list_businesses(conn, account["id"])
 

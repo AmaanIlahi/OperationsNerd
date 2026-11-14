@@ -20,6 +20,8 @@ ENV/
 
 # Secrets
 .env
+.env.local
+.local/
 
 # OS / editor
 .DS_Store

@@ -179,10 +179,21 @@ def test_login_sweeps_expired_sessions():
 
 
 def test_oversized_body_is_refused_through_wsgi():
-    c = Client()
-    status, _, _ = c.call("POST", "/api/auth/signup", {"email": "big@example.com", "password": "x" * 2_000_000,
-                                                       "invite_code": "let-me-in"})
-    assert status == 413
+    # The server rejects an oversized declared length before reading the body.
+    # Sending two megabytes eagerly races that legitimate early response: the
+    # server can close while HTTPConnection.send is still writing, producing a
+    # platform-dependent BrokenPipe instead of letting the client read the 413.
+    conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=30)
+    try:
+        conn.putrequest("POST", "/api/auth/signup")
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", "2000000")
+        conn.endheaders()
+        response = conn.getresponse()
+        assert response.status == 413
+        assert "too large" in json.loads(response.read())["detail"].lower()
+    finally:
+        conn.close()
 
 
 class Skip(Exception):
