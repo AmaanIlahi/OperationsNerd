@@ -29,11 +29,22 @@ def _clean_environment():
             and not any(part in key for part in ('API_KEY','TOKEN','SECRET','PASSWORD','DATABASE_URL'))}
 
 
+def _resolve_executable(tool):
+    if tool.is_file():
+        return tool
+    for suffix in ('.exe', '.cmd', '.bat'):
+        candidate = tool.parent / f'{tool.name}{suffix}'
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _tool_major(path, name):
-    if not path.is_file():
+    executable = _resolve_executable(path)
+    if executable is None:
         return None
     try:
-        result = subprocess.run([str(path), '--version'], capture_output=True,
+        result = subprocess.run([str(executable), '--version'], capture_output=True,
                                 text=True, timeout=5, env=_clean_environment())
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -120,7 +131,7 @@ def backup_scoped_business(account_id,business_id,directory=None,*,url=None):
     descriptor=os.open(partial,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     os.close(descriptor)
     try:
-        result=subprocess.run([dump_tool,'--format=custom','--no-owner','--no-acl','--no-password',
+        result=subprocess.run([str(_resolve_executable(Path(dump_tool))),'--format=custom','--no-owner','--no-acl','--no-password',
             '--file',str(partial)],env=_environment(url),capture_output=True,timeout=180)
         if result.returncode:
             raise RuntimeError('Consistent business backup failed; no schema upgrade was attempted')
@@ -167,7 +178,7 @@ def restore_copy(account_id,business_id,archive):
             admin.execute(sql.SQL('CREATE DATABASE {} TEMPLATE template0').format(sql.Identifier(name)))
             created=True
         url=businesses.connection_url(name)
-        result=subprocess.run([restore_tool,'--exit-on-error','--no-owner','--no-acl','--no-password',
+        result=subprocess.run([str(_resolve_executable(Path(restore_tool))),'--exit-on-error','--no-owner','--no-acl','--no-password',
             '--dbname',name,str(source)],env=_environment(url),capture_output=True,timeout=180)
         if result.returncode:
             raise RuntimeError('Backup restore failed; the live database was not changed')
