@@ -30,7 +30,7 @@ def main():
             for name in names:
                 admin.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
         environment = dict(os.environ)
-        for key in ("OPERATIONS_DATABASE_URL", "OPERATIONS_ADMIN_DATABASE_URL", "DATABASE_PATH", "APP_ENV"):
+        for key in ("OPERATIONS_DATABASE_URL", "OPERATIONS_ADMIN_DATABASE_URL", "OPERATIONS_PG_BIN", "DATABASE_PATH", "APP_ENV"):
             environment.pop(key, None)
         environment.update({"PYTHONPATH": str(ROOT / "operations_nerd"), "LLM_PROVIDER": "stub",
             "OPERATIONS_BACKUP_DIR": str(Path(directory) / "backups"),

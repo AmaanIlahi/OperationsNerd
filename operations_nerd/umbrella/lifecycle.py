@@ -134,6 +134,9 @@ def _approve(account_id,business_id,proposal_id,nerd_id):
         with d.get_conn() as conn:
             conn.execute("UPDATE nerd_installations SET status='failed' WHERE nerd_id=? AND proposal_id=?",(nerd_id,proposal_id))
             conn.execute("UPDATE nerd_proposals SET status='failed',error_code=? WHERE id=?",(type(error).__name__,proposal_id))
+        from umbrella.backup import BackupToolError
+        if isinstance(error,BackupToolError):
+            raise HTTPException(503,str(error)) from None
         if isinstance(error,HTTPException):
             raise
         if isinstance(error,ValueError):

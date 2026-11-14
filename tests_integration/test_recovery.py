@@ -103,6 +103,64 @@ class RecoveryTests(flow.UmbrellaHTTPTests):
                 restore_copy(aid,self.bid,tampered)
             self.assertEqual(self.fixture.business_url(self.bid),live_url)
 
+    def test_old_path_tools_do_not_replace_matching_backup_and_restore(self):
+        from psycopg import sql
+        from umbrella import backup
+        self.enable()
+        aid=self.response(self.owner.get('/api/auth/me'))['id']
+        major=self.fixture.admin.info.server_version//10000
+        matching=Path(backup._toolchain(major)[0]).parent
+        before=self.fixture.core_snapshot(self.bid)
+        recovered=None
+        with tempfile.TemporaryDirectory(prefix='old-pg-tools-proof-') as directory:
+            folder=Path(directory)
+            shims=folder/'system-bin'
+            shims.mkdir()
+            marker=folder/'old-tool-ran'
+            for name in ('pg_dump','pg_restore'):
+                executable=shims/name
+                executable.write_text(f'#!/bin/sh\n: > "{marker}"\necho "{name} (PostgreSQL) {major-2}.2"\nexit 91\n')
+                executable.chmod(0o700)
+            try:
+                with patch.dict(os.environ,{'PATH':str(shims),'OPERATIONS_PG_BIN':''}), \
+                     patch.object(backup,'_bundled_bin',return_value=matching):
+                    saved=backup.backup_business(aid,self.bid,folder/'archives')
+                    metadata=json.loads(Path(saved['manifest']).read_text())
+                    self.assertEqual(metadata['postgres_major'],major)
+                    self.assertEqual(metadata['backup_tool_major'],major)
+                    recovered=backup.restore_copy(aid,self.bid,saved['archive'])
+                self.assertTrue(recovered['verified'])
+                self.assertFalse(marker.exists(),'An older PATH binary was executed')
+                self.assertEqual(self.fixture.core_snapshot(self.bid),before)
+            finally:
+                if recovered:
+                    self.fixture.admin.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(
+                        sql.Identifier(recovered['database_name'])))
+
+    def test_missing_matching_tools_stop_enable_and_restore_before_artifacts(self):
+        from umbrella import backup,registry
+        aid=self.response(self.owner.get('/api/auth/me'))['id']
+        proposal=self.response(self.owner.post(self.base+'/nerds/logistics/proposals',
+            json={'base_version':1,'bindings':self.bindings}),201)
+        with tempfile.TemporaryDirectory(prefix='tool-preflight-proof-') as directory:
+            saved=backup.backup_business(aid,self.bid,directory)
+            files=set(Path(directory).iterdir())
+            databases={row[0] for row in self.fixture.admin.execute('SELECT datname FROM pg_database')}
+            with patch.dict(os.environ,{'OPERATIONS_BACKUP_DIR':directory}), \
+                 patch.object(backup,'_toolchain',side_effect=backup.BackupToolError(
+                     'No matching PostgreSQL tools. Set OPERATIONS_PG_BIN.')), \
+                 patch.object(registry,'migrator') as migrator:
+                failed=self.response(self.owner.post(self.base+f"/nerds/logistics/proposals/{proposal['id']}/approve"),503)
+                self.assertIn('OPERATIONS_PG_BIN',failed['detail'])
+                migrator.assert_not_called()
+                before=self.fixture.core_snapshot(self.bid)
+                with self.assertRaises(backup.BackupToolError):
+                    backup.restore_copy(aid,self.bid,saved['archive'])
+            self.assertEqual(set(Path(directory).iterdir()),files)
+            self.assertEqual({row[0] for row in self.fixture.admin.execute('SELECT datname FROM pg_database')},databases)
+            self.assertEqual(self.fixture.core_snapshot(self.bid),before)
+            self.assertEqual(self.fixture.scalar(self.bid,"SELECT count(*) FROM pg_namespace WHERE nspname='logistics'"),0)
+
 
 def load_tests(loader,tests,pattern):
     return unittest.TestSuite(RecoveryTests(name) for name,method in RecoveryTests.__dict__.items()

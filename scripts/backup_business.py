@@ -22,11 +22,13 @@ def main():
     parser.add_argument('--out-dir')
     parser.add_argument('--restore-copy',type=Path)
     args=parser.parse_args()
-    from umbrella.backup import backup_business,restore_copy
+    from umbrella.backup import BackupToolError,backup_business,restore_copy
     try:
         result=restore_copy(args.owner,args.business,args.restore_copy) if args.restore_copy else \
             backup_business(args.owner,args.business,args.out_dir)
         print(json.dumps(result,indent=2))
+    except BackupToolError as error:
+        raise SystemExit(str(error)) from None
     except Exception:
         raise SystemExit('Backup/recovery did not complete. The live database was not replaced. Check identity, tools and connectivity.') from None
 

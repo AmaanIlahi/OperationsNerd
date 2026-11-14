@@ -12,6 +12,26 @@ missing applied source files are rejected. A failed install retains its schema
 and can retry the same proposal. Disable retains operational history and only
 allows re-enabling the original mappings.
 
+The host checks the connected PostgreSQL server's major version before a backup
+or restore. It selects `pg_dump` and `pg_restore` from the same directory and
+requires both to match that major version. Matching bundled tools take priority
+over `PATH`; an older system installation cannot replace them. If no matching
+pair is available, installation stops before module migration and restore stops
+before creating its quarantine database. The error identifies the required major.
+
+For a custom PostgreSQL installation, set `OPERATIONS_PG_BIN` to the directory
+containing both tools. This explicit selection is authoritative; an invalid
+selection fails rather than falling back. Tool version probes receive no model
+keys or database credentials. The backup manifest records server/tool majors.
+Older manifests without those optional fields remain supported.
+
+Exact-major matching is a conservative policy for restoring to the current local
+server. PostgreSQL permits some cross-version dumps, but an older client cannot
+dump a newer server, and a newer client's output may not restore into an older
+server. See [PostgreSQL's compatibility notes](https://www.postgresql.org/docs/16/app-pgdump.html#APP-PGDUMP-NOTES).
+The local launcher and bundled-tool workflow are tested on macOS; custom Unix
+installations can use the explicit directory setting.
+
 To create an additional backup while the local server is running:
 
 ```sh
