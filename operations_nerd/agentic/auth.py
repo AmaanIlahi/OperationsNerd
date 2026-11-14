@@ -206,7 +206,7 @@ def current_account(request: Request) -> dict:
     """FastAPI dependency: the logged-in account, or 401."""
     token = request.cookies.get(SESSION_COOKIE)
     if token:
-        with d.get_conn() as conn:
+        with d.control_conn() as conn:
             account = account_for_token(conn, token)
         if account:
             return account

@@ -30,11 +30,14 @@ Set these in the platform's dashboard (never commit them; `.env` is git-ignored 
 |---|---|---|
 | `APP_ENV` | yes | `production`. Turns on the strict startup checks and always-`Secure` cookies. |
 | `SESSION_SECRET` | yes | Random string, at least 32 characters. Keys the hash of session tokens. Changing it logs everyone out. |
-| `LLM_PROVIDER` | no | `gemini` (default), `anthropic`, or `stub` (no model, no key; the assistant never proposes changes). |
+| `LLM_PROVIDER` | no | `gemini` (default), `anthropic`, `baseten`, or `stub` (no model, no key; the assistant never proposes changes). |
 | `GEMINI_API_KEY` | yes when `LLM_PROVIDER=gemini` (the default) | Google AI Studio API key for the assistant. |
 | `GEMINI_MODEL` | no | Gemini model id. Defaults to `gemini-3.8-flash`. |
 | `ANTHROPIC_API_KEY` | yes when `LLM_PROVIDER=anthropic` | Anthropic API key for the assistant. |
 | `ANTHROPIC_MODEL` | no | Anthropic model id. Defaults to `claude-sonnet-5-5`. |
+| `BASETEN_API_KEY` | yes when `LLM_PROVIDER=baseten` | Server-only Baseten key for Model APIs. |
+| `BASETEN_MODEL` | no | Defaults to `openai/gpt-oss-120b`. |
+| `BASETEN_BASE_URL` | no | Defaults to `https://inference.baseten.co/v1`; overrides must be trusted HTTPS Baseten Model API or dedicated-deployment `/v1` endpoints. |
 | `SIGNUP_INVITE_CODE` | yes, in practice | Signup is **closed** unless this is set (the visitor must type it) or `ALLOW_OPEN_SIGNUP=1`. |
 | `DATABASE_PATH` | set by the Dockerfile | `/data/operations_nerd.db`. Only override it if the volume is mounted elsewhere. |
 | `PORT` | set by the platform | The container listens on it. `[UNVERIFIED]` Railway and Render both inject `PORT`; the Dockerfile falls back to 8000. |
@@ -46,8 +49,19 @@ Set these in the platform's dashboard (never commit them; `.env` is git-ignored 
 
 The app **refuses to start** (and the deploy shows the reason in the logs) when `APP_ENV=production` and
 `SESSION_SECRET` or the selected provider's API key (`GEMINI_API_KEY` by default) is missing,
-`LLM_PROVIDER` is not one of `gemini`, `anthropic`, `stub`, `SESSION_SECRET` is shorter than 32 characters,
+`LLM_PROVIDER` is not one of `gemini`, `anthropic`, `baseten`, `stub`, `SESSION_SECRET` is shorter than 32 characters,
 or `CONFIG_AGENT_ENABLED` is set.
+
+For the integrated app's Baseten assistant, set `LLM_PROVIDER=baseten`, `BASETEN_API_KEY`, and optionally
+`BASETEN_MODEL=openai/gpt-oss-120b`. The provider sends schema-constrained requests to the
+[Baseten Chat Completions API](https://docs.baseten.co/reference/inference-api/chat-completions).
+The [GPT OSS 120B model listing](https://www.baseten.co/library/gpt-oss-120b) confirms the model slug.
+[Structured outputs](https://docs.baseten.co/inference/structured-outputs) constrain the JSON response;
+the existing server validator, impact check and explicit owner approval still govern every spec change.
+Incomplete/refused outputs and provider errors fail without applying changes. Responses are bounded,
+redirects are refused, and errors never include provider response bodies or credentials.
+Business databases remain local in the local setup; assistant prompts and approved-schema context are
+sent to Baseten when that provider is selected.
 
 ### Generate the secrets
 

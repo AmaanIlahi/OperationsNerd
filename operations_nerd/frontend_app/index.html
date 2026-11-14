@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Operations Nerd CRM</title>
+<link rel="icon" href="/app/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/logistics.css">
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #dfe3ea;
@@ -96,10 +98,13 @@
   .spec-entity.archived { opacity: .6; }
   .confirm { border: 1px solid var(--danger); border-radius: 8px; padding: 9px 11px; margin: 8px 0; }
 </style>
+<link rel="stylesheet" href="/app/theme.css">
 </head>
 <body>
 <div id="app"></div>
 
+<script src="/app/logistics.js"></script>
+<script src="/app/modules.js"></script>
 <script>
 'use strict';
 
@@ -158,7 +163,10 @@ async function api(method, path, body, timeoutMs) {
   try {
     resp = await fetch('/api' + path, {
       method,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(S.biz && path.startsWith('/proposals/') ? { 'X-Business-Id': String(S.biz.id) } : {}),
+      },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
@@ -189,8 +197,11 @@ const S = {
   form: null,           // {mode, record}
   chats: {},            // business id -> {messages: [{role, content, proposal}], busy, error}
   history: null,        // {versions, selected, spec, confirming}
+  nerds: [],
+  loadingBusinessId: null,
 };
-const TEMPLATES = [['', 'Empty (start from the chat)'], ['health_club', 'Health club'], ['real_estate', 'Real estate']];
+let businessSelection = 0;
+const TEMPLATES = [['', 'Empty (start from the chat)'], ['health_club', 'Health club'], ['real_estate', 'Real estate'], ['toy_store', 'Toy store (orders and inventory)']];
 const root = document.getElementById('app');
 
 function remember(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage may be blocked */ } }
@@ -198,15 +209,19 @@ function recall(key) { try { return localStorage.getItem(key); } catch (e) { ret
 
 function sessionExpired() {
   if (!S.account) return;
+  LogisticsUI.reset();
+  BusinessModules.reset();
   S.account = null; S.biz = null; S.businesses = [];
   showAuth('Your session ended. Please log in again.');
 }
 
 // ---------- spec helpers ----------
 
-function entities() { return S.biz.spec.entities.filter(e => !e.archived); }
-function currentEntity() { return S.biz.spec.entities.find(e => e.key === S.tab && !e.archived) || null; }
+function entities() { return S.biz ? S.biz.spec.entities.filter(e => !e.archived) : []; }
+function currentEntity() { return S.biz ? S.biz.spec.entities.find(e => e.key === S.tab && !e.archived) || null : null; }
 function activeFields(e) { return e.fields.filter(f => !f.archived); }
+function isMinorMoneyField(field) { return field.type === 'number' && /\((minor units|cents)\)/i.test(field.label); }
+function visibleFieldLabel(field) { return isMinorMoneyField(field) ? field.label.replace(/\s*\((minor units|cents)\)/i, '') : field.label; }
 function linksFrom(e, cardinalities) {
   return S.biz.spec.links.filter(l => !l.archived && l.from === e.key && cardinalities.includes(l.cardinality));
 }
@@ -294,18 +309,30 @@ function buildShell() {
   shell.send = el('button', { class: 'primary', text: 'Send', onclick: () => sendChat() });
   add(shell.right, [shell.chatHead, shell.messages, shell.chatStatus,
     el('div', { id: 'chat-form' }, shell.input, shell.send)]);
-  fill(root, shell.header, el('main', null, shell.left, shell.right));
+  shell.main = el('main', null, shell.left, shell.right);
+  fill(root, shell.header, shell.main);
   renderHeader();
 }
 
 function renderHeader() {
+  const moduleView = S.view === 'logistics' || S.view.startsWith('module:');
+  shell.right.hidden = moduleView;
+  shell.main.classList.toggle('logistics-wide', moduleView);
   const picker = el('select', { 'aria-label': 'Business', onchange: (ev) => selectBusiness(Number(ev.target.value)) },
-    S.businesses.map(b => el('option', { value: String(b.id), text: b.name, selected: S.biz && S.biz.id === b.id })));
+    S.businesses.map(b => el('option', { value: String(b.id), text: b.name, selected: (S.biz ? S.biz.id : S.loadingBusinessId) === b.id })));
   fill(shell.header,
-    el('strong', { text: 'Operations Nerd' }),
+    el('div', { class: 'app-brand', 'aria-label': 'Operations Nerd' },
+      el('span', { class: 'app-brand-mark', 'aria-hidden': 'true', text: 'N' }),
+      el('span', null, 'Operations', el('span', { class: 'app-brand-light', text: 'Nerd' }), el('span', { class: 'app-brand-dot', text: '.' }))),
     S.businesses.length ? picker : null,
     el('button', { text: 'New business', onclick: () => showCreateBusiness() }),
-    S.biz ? el('button', { text: S.view === 'history' ? 'Back to CRM' : 'History', onclick: () => toggleHistory() }) : null,
+    S.biz ? el('nav', { class: 'row', 'aria-label': 'Business workspace' },
+      el('button', { text: 'CRM', class: S.view === 'crm' ? 'primary' : '', onclick: async () => { S.view = 'crm'; renderHeader(); await renderCrm(); } }),
+      S.nerds.map(nerd => el('button', { text: (nerd.display_name || nerd.name).replace(/Nerd$/, ''), class: S.view === (nerd.id === 'logistics' ? 'logistics' : 'module:' + nerd.id) ? 'primary' : '', onclick: async () => {
+        S.view = nerd.id === 'logistics' ? 'logistics' : 'module:' + nerd.id;
+        renderHeader(); await renderCrm();
+      } })),
+      el('button', { text: 'History', class: S.view === 'history' ? 'primary' : '', onclick: () => toggleHistory() })) : null,
     el('span', { class: 'spacer' }),
     el('span', { class: 'muted', text: S.account.email }),
     el('button', { text: 'Log out', onclick: logout }));
@@ -313,11 +340,14 @@ function renderHeader() {
 
 async function logout() {
   try { await api('POST', '/auth/logout'); } catch (e) { /* cookie may already be gone */ }
+  LogisticsUI.reset();
+  BusinessModules.reset();
   S.account = null; S.biz = null; S.businesses = []; S.chats = {};
   showAuth();
 }
 
 function showCreateBusiness() {
+  ++businessSelection;
   const name = el('input', { type: 'text', maxLength: 100, placeholder: 'e.g. Sunshine Fitness' });
   const template = el('select', null, TEMPLATES.map(([v, t]) => el('option', { value: v, text: t })));
   const err = el('div');
@@ -344,15 +374,27 @@ function showCreateBusiness() {
 }
 
 async function selectBusiness(id) {
+  const selection = ++businessSelection;
+  S.view = 'crm'; S.loadingBusinessId = id; S.biz = null; S.nerds = [];
+  renderHeader();
+  fill(shell.left, el('p', { class: 'muted', text: 'Loading business…' }));
+  fill(shell.messages); shell.input.value = '';
+  let business;
   try {
-    S.biz = await api('GET', '/businesses/' + id);
+    business = await api('GET', '/businesses/' + id);
   } catch (e) {
-    S.biz = null; fill(shell.left, el('div', { class: 'error', text: e.message })); return;
+    if (selection === businessSelection && S.account) fill(shell.left, el('div', { class: 'error', text: e.message })); return;
   }
+  if (selection !== businessSelection || !S.account) return;
+  S.biz = business; S.loadingBusinessId = null;
   remember('biz-' + S.account.id, String(id));
   S.tab = null; S.recs = null; S.form = null; S.history = null; S.view = 'crm';
+  S.nerds = [];
+  await loadNerds();
+  if (selection !== businessSelection || !S.account) return;
   renderHeader();
   await loadChatHistory();
+  if (selection !== businessSelection || !S.account) return;
   renderChat();
   await renderCrm();
 }
@@ -360,6 +402,7 @@ async function selectBusiness(id) {
 // Reload the spec after it changed (approve / revert) and redraw the CRM.
 async function refreshBusiness() {
   S.biz = await api('GET', '/businesses/' + S.biz.id);
+  await loadNerds();
   S.recs = null; S.form = null;
   if (S.view === 'history') await loadHistory(); else await renderCrm();
   renderHeader();
@@ -369,6 +412,10 @@ async function refreshBusiness() {
 
 async function renderCrm() {
   if (S.view === 'history') return renderHistory();
+  if (S.view === 'logistics') return renderLogistics();
+  if (S.view.startsWith('module:')) return renderNerd(S.view.slice(7));
+  if (!S.biz) return;
+  const businessId = S.biz.id;
   const ents = entities();
   if (!ents.some(e => e.key === S.tab)) S.tab = ents.length ? ents[0].key : null;
 
@@ -383,17 +430,59 @@ async function renderCrm() {
   }
   const body = el('div', { text: 'Loading…', class: 'muted' });
   fill(shell.left, el('div', { class: 'row' }, el('h2', { text: S.biz.name }), el('span', { class: 'muted', text: 'version ' + S.biz.current_version })), tabs, body);
+  const recordEntityKey = S.tab;
   await loadRecords();
+  if (!S.biz || S.biz.id !== businessId || S.view !== 'crm' || S.tab !== recordEntityKey || S.recs?.entity !== recordEntityKey) return;
   drawRecords(body);
+}
+
+async function renderLogistics() {
+  const biz = S.biz;
+  if (!biz) return;
+  await LogisticsUI.render({
+    container: shell.left, business: biz, api, el, fill,
+    isCurrent: () => S.biz && S.biz.id === biz.id && S.view === 'logistics',
+    refreshBusiness,
+    openRecords: async (entityKey) => {
+      S.view = 'crm'; S.tab = entityKey; S.recs = null; S.form = null;
+      renderHeader(); await renderCrm();
+    },
+  });
+}
+
+async function loadNerds() {
+  const id = S.biz.id;
+  try {
+    const result = await api('GET', '/businesses/' + id + '/nerds');
+    if (S.biz && S.biz.id === id) S.nerds = result.nerds || [];
+  } catch (error) { if (S.biz && S.biz.id === id) S.nerds = []; }
+}
+
+async function renderNerd(id) {
+  const biz = S.biz;
+  if (!biz) return;
+  await BusinessModules.render({
+    id, container: shell.left, business: biz, api, el, fill,
+    isCurrent: () => S.biz && S.biz.id === biz.id && S.view === 'module:' + id,
+    refreshBusiness,
+    openRecords: async entityKey => {
+      S.view = 'crm'; S.tab = entityKey; S.recs = null; S.form = null;
+      renderHeader(); await renderCrm();
+    },
+  });
 }
 
 async function loadRecords(append) {
   const ent = currentEntity();
+  if (!ent || !S.biz) return;
+  const businessId = S.biz.id;
   const offset = append && S.recs ? S.recs.items.length : 0;
   try {
-    const page = await api('GET', `/businesses/${S.biz.id}/records/${ent.key}?limit=100&offset=${offset}`);
+    const page = await api('GET', `/businesses/${businessId}/records/${ent.key}?limit=100&offset=${offset}`);
+    if (!S.biz || S.biz.id !== businessId || S.tab !== ent.key) return;
     S.recs = { entity: ent.key, items: (append && S.recs ? S.recs.items : []).concat(page.records), total: page.total, error: null };
   } catch (e) {
+    if (!S.biz || S.biz.id !== businessId || S.tab !== ent.key) return;
     S.recs = { entity: ent.key, items: [], total: 0, error: e };
     if (e.status === 409) { await refreshBusiness(); }
   }
@@ -412,7 +501,7 @@ function drawRecords(body) {
   const toOne = linksFrom(ent, TO_ONE);
   const toMany = linksFrom(ent, TO_MANY);
 
-  const head = el('tr', null, fields.map(f => el('th', { text: f.label })), toOne.map(l => el('th', { text: l.label })), el('th'));
+  const head = el('tr', null, fields.map(f => el('th', { text: visibleFieldLabel(f) })), toOne.map(l => el('th', { text: l.label })), el('th'));
   const rows = S.recs.items.map(rec => {
     const bad = new Set(rec.invalid_fields);
     const cells = fields.map(f => el('td', {
@@ -441,6 +530,7 @@ function drawRecords(body) {
 
 function fmt(field, v) {
   if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '';
+  if (isMinorMoneyField(field) && Number.isFinite(Number(v))) return (Number(v) / 100).toFixed(2);
   if (field.type === 'boolean') return v === true ? 'Yes' : v === false ? 'No' : String(v);
   return Array.isArray(v) ? v.join(', ') : String(v);
 }
@@ -456,8 +546,10 @@ function buildForm(ent, form, body) {
 
   function wrapField(key, label, required, control, extra) {
     const errBox = el('div', { class: 'field-error' });
+    control.id = 'field-' + key;
+    control.setAttribute('aria-labelledby', 'label-' + key);
     const wrap = el('div', { class: 'field' },
-      el('label', null, label, required ? el('span', { class: 'req', text: ' *' }) : null),
+      el('label', { id: 'label-' + key, htmlFor: control.id }, label, required ? el('span', { class: 'req', text: ' *' }) : null),
       control, extra, errBox);
     wrap.addEventListener('input', () => touched.add(key));
     wrap.addEventListener('change', () => touched.add(key));
@@ -473,7 +565,15 @@ function buildForm(ent, form, body) {
     const stored = editing && !invalid.has(f.key) ? rec.values[f.key] : undefined;
     let control, get;
     const opts = f.options || [];
-    if (f.type === 'long_text') {
+    if (isMinorMoneyField(f)) {
+      control = el('input', { type: 'text', inputMode: 'decimal', pattern: '[0-9]+([.][0-9]{1,2})?', value: stored === undefined || stored === null ? '' : (Number(stored) / 100).toFixed(2) });
+      const minorValue = () => {
+        const parts = control.value.trim().split('.');
+        return Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2, '0'));
+      };
+      control.addEventListener('input', () => control.setCustomValidity(control.value && !Number.isSafeInteger(minorValue()) ? 'Enter a smaller amount.' : ''));
+      get = () => control.value.trim() === '' ? null : String(minorValue());
+    } else if (f.type === 'long_text') {
       control = el('textarea', { rows: 3, value: stored ?? '' });
       get = () => control.value === '' ? null : control.value;
     } else if (f.type === 'boolean') {
@@ -494,7 +594,8 @@ function buildForm(ent, form, body) {
       control = el('input', { type, step: f.type === 'number' ? 'any' : null, value: stored === undefined || stored === null ? '' : String(stored) });
       get = () => control.value.trim() === '' ? null : control.value.trim();
     }
-    const { wrap, errBox } = wrapField(f.key, f.label, f.required, control, note(f.key));
+    const { wrap, errBox } = wrapField(f.key, visibleFieldLabel(f), f.required, control, note(f.key));
+    if (isMinorMoneyField(f)) wrap.append(el('div', { class: 'muted', text: 'Enter currency units, for example 10.00. Stored as whole cents.' }));
     controls.push({ key: f.key, get, wrap, errBox });
   }
 
@@ -515,6 +616,11 @@ function buildForm(ent, form, body) {
   const save = el('button', { class: 'primary', text: editing ? 'Save changes' : 'Create' });
   const cancel = el('button', { text: 'Cancel', onclick: () => { S.form = null; drawRecords(body); } });
   save.addEventListener('click', async () => {
+    for (const c of controls) {
+      for (const input of c.wrap.querySelectorAll('input, select, textarea')) {
+        if (!input.checkValidity()) { input.reportValidity(); return; }
+      }
+    }
     const values = {};
     for (const c of controls) {
       const v = c.get();

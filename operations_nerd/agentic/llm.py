@@ -6,7 +6,7 @@ system prompt plus chat messages. Every provider implements that one method
 (LLMClient.call_structured) and returns an LLMResult, so the agent turn,
 validator and audit trail do not care which provider answered.
 
-    LLM_PROVIDER = gemini | anthropic | stub      (default: gemini)
+    LLM_PROVIDER = gemini | anthropic | baseten | stub      (default: gemini)
 
 Provider modules are imported only when selected, so a missing SDK or key for
 one provider never affects another. Tests replace agentic.chat.run_llm.
@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
-PROVIDERS = ("gemini", "anthropic", "stub")
+PROVIDERS = ("gemini", "anthropic", "baseten", "stub")
 DEFAULT_PROVIDER = "gemini"
 
 
@@ -46,7 +46,7 @@ def get_provider() -> str:
 
 def required_key_env(provider: str | None = None) -> str | None:
     """Name of the API-key env var the selected provider needs, if any."""
-    return {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(provider or get_provider())
+    return {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "baseten": "BASETEN_API_KEY"}.get(provider or get_provider())
 
 
 class _StubClient:
@@ -72,7 +72,13 @@ class _AnthropicClient:
         return anthropic_llm.call_structured(system, messages, response_schema)
 
 
-_CLIENTS = {"gemini": _GeminiClient(), "anthropic": _AnthropicClient(), "stub": _StubClient()}
+class _BasetenClient:
+    def call_structured(self, system, messages, response_schema):
+        from agentic import baseten_llm
+        return baseten_llm.call_structured(system, messages, response_schema)
+
+
+_CLIENTS = {"gemini": _GeminiClient(), "anthropic": _AnthropicClient(), "baseten": _BasetenClient(), "stub": _StubClient()}
 
 
 def get_client() -> LLMClient:

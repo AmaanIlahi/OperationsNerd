@@ -1,0 +1,66 @@
+{
+  "business": {"name": "Toy Store", "industry": "toy_store"},
+  "entities": [
+    {
+      "key": "crm_supplier", "label": "Supplier", "archived": false,
+      "fields": [
+        {"key": "f_supplier_name", "label": "Name", "type": "text", "required": true, "archived": false},
+        {"key": "f_supplier_email", "label": "Email", "type": "email", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_customer", "label": "Customer", "archived": false,
+      "fields": [
+        {"key": "f_customer_name", "label": "Name", "type": "text", "required": true, "archived": false},
+        {"key": "f_customer_email", "label": "Email", "type": "email", "required": false, "archived": false},
+        {"key": "f_customer_address", "label": "Shipping address", "type": "long_text", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_item", "label": "Item", "archived": false,
+      "fields": [
+        {"key": "f_item_name", "label": "Name", "type": "text", "required": true, "archived": false},
+        {"key": "f_item_sku", "label": "SKU", "type": "text", "required": true, "archived": false},
+        {"key": "f_item_unit", "label": "Unit", "type": "text", "required": true, "archived": false},
+        {"key": "f_item_age", "label": "Minimum age", "type": "number", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_location", "label": "Location", "archived": false,
+      "fields": [
+        {"key": "f_location_name", "label": "Name", "type": "text", "required": true, "archived": false},
+        {"key": "f_location_address", "label": "Address", "type": "long_text", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_order", "label": "Customer order", "archived": false,
+      "fields": [
+        {"key": "f_order_number", "label": "Order number", "type": "text", "required": true, "archived": false},
+        {"key": "f_order_currency", "label": "Currency", "type": "text", "required": true, "archived": false},
+        {"key": "f_order_date", "label": "Order date", "type": "date", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_order_line", "label": "Order line", "archived": false,
+      "fields": [
+        {"key": "f_line_quantity", "label": "Quantity", "type": "number", "required": true, "archived": false},
+        {"key": "f_line_price", "label": "Unit price (minor units)", "type": "number", "required": true, "archived": false},
+        {"key": "f_line_required", "label": "Required by", "type": "date", "required": true, "archived": false},
+        {"key": "f_line_budget", "label": "Budget (minor units)", "type": "number", "required": false, "archived": false}
+      ]
+    },
+    {
+      "key": "crm_employee", "label": "Employee", "archived": false,
+      "fields": [
+        {"key": "f_employee_name", "label": "Name", "type": "text", "required": true, "archived": false},
+        {"key": "f_employee_email", "label": "Email", "type": "email", "required": false, "archived": false},
+        {"key": "f_employee_role", "label": "Role", "type": "text", "required": false, "archived": false}
+      ]
+    }
+  ],
+  "links": [
+    {"key": "l_order_customer", "label": "Customer", "from": "crm_order", "to": "crm_customer", "cardinality": "many_to_one", "archived": false},
+    {"key": "l_line_order", "label": "Order", "from": "crm_order_line", "to": "crm_order", "cardinality": "many_to_one", "archived": false},
+    {"key": "l_line_item", "label": "Item", "from": "crm_order_line", "to": "crm_item", "cardinality": "many_to_one", "archived": false}
+  ]
+}

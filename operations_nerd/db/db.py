@@ -13,12 +13,36 @@ import json
 import os
 from contextlib import contextmanager
 
+try:
+    from db import runtime
+except ModuleNotFoundError as exc:
+    if exc.name != "db":
+        raise
+    # A few legacy consumers load this single file with importlib instead of
+    # importing the package. Keep that supported without changing sys.path.
+    import importlib.util
+    _runtime_spec = importlib.util.spec_from_file_location(
+        "_operations_database_runtime", os.path.join(os.path.dirname(__file__), "runtime.py")
+    )
+    runtime = importlib.util.module_from_spec(_runtime_spec)
+    _runtime_spec.loader.exec_module(runtime)
+
 DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.path.dirname(__file__), "operations_nerd.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 
-def init_db(db_path: str = DB_PATH, reset: bool = False):
+def _target(db_path=None, *, control=False):
+    if db_path is not None:
+        return os.fspath(db_path)
+    return (runtime.control_database_url() if control else runtime.current_database_url()) or DB_PATH
+
+
+def init_db(db_path: str | None = None, reset: bool = False):
     """Create the database and apply schema.sql. If reset=True, wipes any existing file first."""
+    db_path = _target(db_path)
+    if runtime.is_postgres_url(db_path):
+        from db.postgres import initialize
+        return initialize(db_path, reset=reset)
     if reset and os.path.exists(db_path):
         os.remove(db_path)
     if reset:
@@ -39,10 +63,15 @@ def init_db(db_path: str = DB_PATH, reset: bool = False):
 
 
 @contextmanager
-def get_conn(db_path: str = DB_PATH):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+def get_conn(db_path: str | None = None):
+    target = _target(db_path)
+    if runtime.is_postgres_url(target):
+        from db.postgres import Connection
+        conn = Connection(target)
+    else:
+        conn = sqlite3.connect(target)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
@@ -55,6 +84,22 @@ def get_conn(db_path: str = DB_PATH):
         raise
     finally:
         conn.close()
+
+
+@contextmanager
+def control_conn():
+    """Accounts, sessions and registry always use control, even in a business scope."""
+    with get_conn(_target(control=True)) as conn:
+        yield conn
+
+
+def raw_postgres_conn(url: str | None = None, *, autocommit: bool = True):
+    """Native psycopg connection for modules with their own transaction boundary."""
+    from db.postgres import raw_connection
+    target = _target(url)
+    if not runtime.is_postgres_url(target):
+        raise ValueError("A PostgreSQL connection URL is required")
+    return raw_connection(target, autocommit=autocommit)
 
 
 def _row_to_dict(row: sqlite3.Row, json_fields=()) -> dict:

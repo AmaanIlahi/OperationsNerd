@@ -201,6 +201,10 @@ def create_record(account_id: int, business_id: int, entity_key: str, values: di
     with d.get_conn() as conn:
         _begin_write(conn)
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
+        from umbrella.businesses import enabled as umbrella_enabled
+        if umbrella_enabled():
+            from umbrella.registry import assert_record_writable
+            assert_record_writable(conn, business_id, entity_key, values)
         cleaned, errors = _check_values(conn, business_id, spec, entity, values, None)
         if errors:
             raise RecordError(422, errors)
@@ -215,6 +219,10 @@ def update_record(account_id: int, business_id: int, entity_key: str, record_id:
         _begin_write(conn)
         spec, entity = _entity_in_current_spec(conn, account_id, business_id, entity_key)
         record = _owned_record(conn, business_id, entity_key, record_id)
+        from umbrella.businesses import enabled as umbrella_enabled
+        if umbrella_enabled():
+            from umbrella.registry import assert_record_writable
+            assert_record_writable(conn, business_id, entity_key, values, record_id=record_id)
         cleaned, errors = _check_values(
             conn, business_id, spec, entity, values, record["attributes"], record_id
         )

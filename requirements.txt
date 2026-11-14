@@ -7,3 +7,4 @@ google-genai
 python-dotenv
 bcrypt
 a2wsgi
+psycopg[binary]>=3.2,<4

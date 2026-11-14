@@ -1,0 +1,30 @@
+main.logistics-wide { grid-template-columns: minmax(0, 1fr); }
+main.logistics-wide #chat-pane { display: none; }
+.logistics-head { align-items: flex-start; margin-bottom: 16px; }
+.logistics-head h2 { font-size: 23px; }
+.logistics-head p { margin: 4px 0 0; }
+.logistics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(285px, 1fr)); gap: 14px; align-items: start; }
+.logistics-grid > * { min-width: 0; }
+.logistics-card { border: 1px solid var(--line); border-radius: 9px; padding: 15px; margin-bottom: 14px; }
+.logistics-card h3 { font-size: 16px; margin-bottom: 8px; }
+.logistics-field { display: block; margin-bottom: 10px; font-weight: 600; }
+.logistics-field > input, .logistics-field > select { display: block; margin-top: 4px; font-weight: normal; }
+.logistics-field small { display: block; font-weight: normal; color: var(--muted); margin-top: 3px; }
+.logistics-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 0 12px; }
+.logistics-mapping { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+.logistics-mapping fieldset { border: 1px solid var(--line); border-radius: 9px; padding: 12px; min-width: 0; margin: 0; }
+.logistics-mapping legend { font-weight: 700; padding: 0 5px; }
+.logistics-actions { margin: 14px 0; }
+.logistics-tabs { margin: 15px 0; }
+.logistics-stat { padding: 10px 15px; background: var(--bg); border-radius: 8px; }
+.logistics-stat strong { display: block; font-size: 22px; }
+.logistics-card .table-wrap { margin-top: 10px; max-height: 400px; overflow: auto; }
+.logistics-empty { padding: 12px 0; color: var(--muted); }
+.logistics-receipt-line { padding: 12px; margin: 10px 0; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
+.logistics-table-caption { margin: 7px 0; color: var(--muted); }
+.logistics-status:empty { display: none; }
+@media (max-width: 600px) {
+  .logistics-grid, .logistics-mapping, .logistics-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .logistics-card { padding: 12px; }
+  header nav { width: 100%; }
+}
