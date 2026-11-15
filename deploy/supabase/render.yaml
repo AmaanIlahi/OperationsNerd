@@ -1,0 +1,891 @@
+# PAID resources: plan/review only until credit or spending is explicitly approved.
+services:
+- type: pserv
+  name: opsnerd-integrated-db
+  runtime: docker
+  region: virginia
+  plan: 1c-2g
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/db.Dockerfile
+  dockerContext: .
+  envVars:
+  - &id001
+    key: POSTGRES_PORT
+    value: '5432'
+  - &id002
+    key: POSTGRES_DB
+    value: postgres
+  - &id003
+    key: APP_DB_NAME
+    value: opsnerd_control
+  - &id004
+    key: APP_ALLOW_DATABASE_CREATE
+    value: 'true'
+  - &id005
+    key: DASHBOARD_USERNAME
+    value: supabase
+  - &id006
+    key: SUPABASE_DB_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      property: host
+  - &id007
+    key: SUPABASE_GATEWAY_HOST
+    fromService:
+      type: web
+      name: opsnerd-integrated-api-gw
+      property: host
+  - &id008
+    key: SUPABASE_PUBLIC_URL
+    fromService:
+      type: web
+      name: opsnerd-integrated-api-gw
+      envVarKey: RENDER_EXTERNAL_URL
+  - &id009
+    key: APP_ORIGIN
+    fromService:
+      type: web
+      name: opsnerd-integrated-app
+      envVarKey: RENDER_EXTERNAL_URL
+  - &id010
+    key: SUPABASE_AUTH_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-auth
+      property: host
+  - &id011
+    key: SUPABASE_REST_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-rest
+      property: host
+  - &id012
+    key: SUPABASE_REALTIME_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-realtime
+      property: host
+  - &id013
+    key: SUPABASE_STORAGE_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-storage
+      property: host
+  - &id014
+    key: SUPABASE_META_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-meta
+      property: host
+  - &id015
+    key: SUPABASE_STUDIO_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-studio
+      property: host
+  - &id016
+    key: SUPABASE_FUNCTIONS_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-functions
+      property: host
+  - key: POSTGRES_PASSWORD
+    sync: false
+  - key: JWT_SECRET
+    sync: false
+  - key: ANON_KEY
+    sync: false
+  - key: SERVICE_ROLE_KEY
+    sync: false
+  - key: DASHBOARD_PASSWORD
+    sync: false
+  - key: SECRET_KEY_BASE
+    sync: false
+  - key: REALTIME_DB_ENC_KEY
+    sync: false
+  - key: VAULT_ENC_KEY
+    sync: false
+  - key: PG_META_CRYPTO_KEY
+    sync: false
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    sync: false
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    sync: false
+  - key: APP_DB_PASSWORD
+    sync: false
+  - key: PORT
+    value: '5432'
+  disk:
+    name: opsnerd-integrated-pgdata
+    mountPath: /var/lib/postgresql
+    sizeGB: 40
+- type: pserv
+  name: opsnerd-integrated-auth
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/auth.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '9999'
+  healthCheckPath: /health
+- type: pserv
+  name: opsnerd-integrated-rest
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/rest.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '3000'
+- type: pserv
+  name: opsnerd-integrated-realtime
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/realtime.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '4000'
+- type: pserv
+  name: opsnerd-integrated-storage
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/storage.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '5000'
+  disk:
+    name: opsnerd-integrated-storage
+    mountPath: /var/lib/storage
+    sizeGB: 10
+  healthCheckPath: /status
+- type: pserv
+  name: opsnerd-integrated-meta
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/meta.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '8080'
+- type: pserv
+  name: opsnerd-integrated-studio
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/studio.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '3000'
+  disk:
+    name: opsnerd-integrated-studio
+    mountPath: /var/lib/studio
+    sizeGB: 1
+- type: pserv
+  name: opsnerd-integrated-functions
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/functions.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: PORT
+    value: '9000'
+- type: web
+  name: opsnerd-integrated-api-gw
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/api-gw.Dockerfile
+  dockerContext: .
+  envVars:
+  - *id001
+  - *id002
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  - *id016
+  - key: POSTGRES_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: POSTGRES_PASSWORD
+  - key: JWT_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: JWT_SECRET
+  - key: ANON_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: ANON_KEY
+  - key: SERVICE_ROLE_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SERVICE_ROLE_KEY
+  - key: DASHBOARD_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: DASHBOARD_PASSWORD
+  - key: SECRET_KEY_BASE
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: SECRET_KEY_BASE
+  - key: REALTIME_DB_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: REALTIME_DB_ENC_KEY
+  - key: VAULT_ENC_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: VAULT_ENC_KEY
+  - key: PG_META_CRYPTO_KEY
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: PG_META_CRYPTO_KEY
+  - key: S3_PROTOCOL_ACCESS_KEY_ID
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_ID
+  - key: S3_PROTOCOL_ACCESS_KEY_SECRET
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: S3_PROTOCOL_ACCESS_KEY_SECRET
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: SUPABASE_PUBLIC_URL
+    fromService:
+      type: web
+      name: opsnerd-integrated-api-gw
+      envVarKey: RENDER_EXTERNAL_URL
+  - key: PORT
+    value: '8000'
+- type: web
+  name: opsnerd-integrated-app
+  runtime: docker
+  region: virginia
+  plan: 0.5c-512mb
+  numInstances: 1
+  autoDeployTrigger: 'off'
+  dockerfilePath: deploy/supabase/images/app.Dockerfile
+  dockerContext: .
+  healthCheckPath: /health/ready
+  disk:
+    name: opsnerd-integrated-backups
+    mountPath: /data
+    sizeGB: 2
+  envVars:
+  - key: DEPLOY_APP_KIND
+    value: integrated
+  - key: APP_DB_NAME
+    value: opsnerd_control
+  - key: SUPABASE_DB_HOST
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      property: host
+  - key: APP_DB_PASSWORD
+    fromService:
+      type: pserv
+      name: opsnerd-integrated-db
+      envVarKey: APP_DB_PASSWORD
+  - key: APP_ORIGIN
+    fromService:
+      type: web
+      name: opsnerd-integrated-app
+      envVarKey: RENDER_EXTERNAL_URL
+  - key: PORT
+    value: '8000'
+  - key: APP_ENV
+    value: production
+  - key: OPERATIONS_UMBRELLA_ENABLED
+    value: '1'
+  - key: OPERATIONS_BACKUP_DIR
+    value: /data/backups
+  - key: LLM_PROVIDER
+    value: stub
+  - key: TRUSTED_PROXIES
+    value: '*'
+  - key: SESSION_SECRET
+    sync: false
+  - key: SIGNUP_INVITE_CODE
+    sync: false

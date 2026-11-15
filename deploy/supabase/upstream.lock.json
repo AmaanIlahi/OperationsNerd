@@ -1,0 +1,51 @@
+{
+  "repository": "https://github.com/supabase/supabase",
+  "release": "self-hosted/v0.8.4",
+  "commit": "189adda99d1b56da55fc5a6ee3f849354aaea92a",
+  "postgres_major": 17,
+  "files": {
+    "docker-compose.yml": "91d706ea68ae8bc194aa278680a91c486f642f1e7ee89a1ebc096d4f72c9c157",
+    "volumes/api/envoy/envoy.yaml": "3697f23b0be9ec5b829f937c600eb9b878f1f778ab510b42ad5e4f14742447e9",
+    "volumes/api/envoy/cds.yaml": "9f2df9e1355cbeda3ecca809bffca9ed439bb18a66b82ca07caf97e27c34c291",
+    "volumes/api/envoy/lds.template.yaml": "51496623f48fe6178634fdd71efa72ec88ee46692a963cf8ec137ff667d9c52a",
+    "volumes/api/envoy/docker-entrypoint.sh": "8a0c9503764de32ba39e0d81e73629457b13ec42ef19897e30e4918c996d0508",
+    "volumes/functions/main/index.ts": "239b2dac871ec05baa2648196240ad3027ae0f6b5da71f4b45ff17df0f360fa2",
+    "volumes/functions/hello/index.ts": "65e7d7ce5d898dd285e660cbab54521fca4bf990c41370f51fad5b4d4cae5f42",
+    "volumes/db/realtime.sql": "7e9e442e7fc4dae05544c07b67bede37a00d84644304dfce4d937134cb4c8f88",
+    "volumes/db/webhooks.sql": "05a61316b899374253891cbba66ce073d9273f33983c3f47961eda3aa26c2823",
+    "volumes/db/roles.sql": "3ad717b225daa38aa982da26750f35641eb404e1eb5e69a763c22236ab96c1b2",
+    "volumes/db/jwt.sql": "c1d3f5c01e44646c2e533c5a1c111821cc49cb5a4c2534e08cddad61d8fb0339",
+    "volumes/db/_supabase.sql": "9dce462adc04137d6afabcf28efa60a6c355270a4b32d7af58891ac4eb964c5f",
+    "volumes/db/logs.sql": "f0463ce5030907acef49326d2bffd36002df0718035071be7c99bd7fc897c63d",
+    "volumes/db/pooler.sql": "df97ebe148d94cfb92a5e37ebf972dfd496be195f0915ecf14396b2cf50efecb",
+    "volumes/functions/main/memory-pressure.ts": "d4b193f43f81abc006a5aca1abc5a41f850800ad6b95370ddac39abef840c269"
+  },
+  "images": {
+    "db": "supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00",
+    "auth": "supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b",
+    "rest": "postgrest/postgrest:v14.18@sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf",
+    "realtime": "supabase/realtime:v2.148.3@sha256:25cf375b9b7cb71d90cdf6e04a1a30996e39a8df866ebd0525bba1d959edc8d6",
+    "storage": "supabase/storage-api:v1.89.12@sha256:8526956cb462e9f7d392e9848ec77133b2769982ed614e9753cc687e8e4339a6",
+    "meta": "supabase/postgres-meta:v0.100.0@sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd",
+    "studio": "supabase/studio:2026.11.02-sha-a05e7ec@sha256:727a7f37b15f4c76c44e0d765e6be231d8d71c67f2933b2df8c6cbcc9b04c5d0",
+    "functions": "supabase/edge-runtime:v1.77.9@sha256:6b850a2ccf0bf50ecac9accff8098095cd191c389c2a53c59b857aa0f53a8343",
+    "api-gw": "envoyproxy/envoy:v1.39.6@sha256:1fde8efee875e4e4f6a39a90fe49d9338e1caacce5762034ef9fb4bbb9ad6aed"
+  },
+  "busybox": "busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478",
+  "included": [
+    "db",
+    "auth",
+    "rest",
+    "realtime",
+    "storage",
+    "meta",
+    "studio",
+    "functions",
+    "api-gw"
+  ],
+  "omitted_optional": [
+    "imgproxy/image transformations",
+    "supavisor/transaction pooler",
+    "analytics/vector"
+  ]
+}
