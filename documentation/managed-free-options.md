@@ -50,3 +50,5 @@ Neon TLS probes found and fixed a container HOME issue after privilege dropping.
 Private Neon Object Storage was verified available on both Free projects. Each app now uploads backups to its own private bucket; failed uploads fail backup completion before schema migration. The integrated archive and manifest can be retrieved and checksum-verified after container replacement. Scoped storage credentials are held only in ignored, mode-0600 local settings and the hosting environment. The object store is part of the same Neon project, so this protects app restarts but is not an independent-provider disaster recovery copy.
 
 Current target: two Render Free web services and the two Neon Free projects. No Supabase cloud services or paid Render disks are needed for this target. Free runtime hours, transfer, compute and storage quotas still apply; no upgrade is authorized. Local Supabase Docker configurations remain an optional development fallback, separate from the actual Neon deployment.
+
+Live deployment completed: see [hosted-demo-status.md](hosted-demo-status.md). Current app URL: https://operationsnerd-logistics-demo.onrender.com/app/
