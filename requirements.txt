@@ -8,3 +8,4 @@ python-dotenv
 bcrypt
 a2wsgi
 psycopg[binary]>=3.2,<4
+boto3==1.44.3

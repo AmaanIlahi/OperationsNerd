@@ -1,12 +1,39 @@
 # secrets and data must never enter the image
 .env
 .env.*
+**/.env
+**/.env.*
+.local/
+**/.local/
+.agents/
+.codex/
+*.dump
+*.partial
+*.pem
+*.key
+*.webm
+*.mp4
+**/*.dump
+**/*.partial
+**/*.pem
+**/*.key
+**/*.webm
+**/*.mp4
+**/demo-login.json
+**/session-secret
+**/backups/
 *.db
 *.db-wal
 *.db-shm
 *-wal
 *-shm
 *.sqlite3
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*-wal
+**/*-shm
+**/*.sqlite3
 backups/
 
 # not needed at runtime
@@ -24,3 +51,9 @@ espocrm-benchmark
 .pytest_cache
 Dockerfile
 .dockerignore
+
+**/.env
+**/.env.*
+**/*.db
+**/*.dump
+**/.local/

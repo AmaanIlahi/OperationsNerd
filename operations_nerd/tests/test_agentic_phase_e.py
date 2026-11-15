@@ -546,11 +546,14 @@ def test_backup_errors_and_command_line():
 def test_dockerfile_and_dockerignore():
     docker = open(os.path.join(REPO, "Dockerfile"), encoding="utf-8").read()
     assert re.search(r"^FROM python:3\.\d+-slim", docker, re.M)
-    assert re.search(r"^USER app", docker, re.M)                              # not root
+    # Hosted volumes need one narrow root bootstrap before the app drops uid.
+    assert 'ENTRYPOINT ["python", "/app/scripts/bootstrap_hosted.py"]' in docker
     assert "requirements.txt" in docker and "pip install" in docker
-    assert "DATABASE_PATH=/data/operations_nerd.db" in docker
-    assert "${PORT:-8000}" in docker and "uvicorn main:app" in docker
-    assert docker.index("USER app") < docker.index("CMD")
+    assert "OPERATIONS_UMBRELLA_ENABLED=1" in docker
+    assert "OPERATIONS_BACKUP_DIR=/data/backups" in docker
+    assert 'CMD ["python", "/app/scripts/start_hosted.py"]' in docker
+    # Effective UID and real mounted-volume behavior are checked by container
+    # smoke tests; avoid assuming an obsolete SQLite command or USER directive.
     ignore = [l.strip() for l in open(os.path.join(REPO, ".dockerignore"), encoding="utf-8") if l.strip() and not l.startswith("#")]
     for needed in (".env", "*.db", "*-wal", "*-shm", "tests", ".git"):
         assert needed in ignore, needed
