@@ -1522,6 +1522,11 @@ def _insert_entry(conn, entry_date, memo, source, source_ref, lines, idempotency
                                                       reverses_id, idempotency_key)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                  (entry_id, entry_date, memo, source, source_ref, debits, reverses_id, idempotency_key))
+    if funds_on:
+        # Check the inserted state while _run still owns the transaction. An
+        # entry affordable on its own date can invalidate an existing later
+        # spend. A later receipt must not hide an intermediate deficit.
+        _check_future_restricted_balances(conn, lines, entry_date, default_fund)
     return entry_id
 
 
@@ -1781,6 +1786,31 @@ def _check_entry_funds_balanced(lines) -> None:
     for fid, totals in by_fund.items():
         if totals["debit"] != totals["credit"]:
             raise Unbalanced(f"fund {fid}: debits ({totals['debit']}) must equal credits ({totals['credit']})")
+
+
+def _check_future_restricted_balances(conn, lines, entry_date, default_fund) -> None:
+    """Validate all affected effective-date balances, not only the posting date.
+
+    Runs after insertion, before the command commits. Raising rolls back the
+    entry, its lines and the command key together. This uses the module's
+    existing capacity calculation; it does not redefine release or cash rules.
+    """
+    affected = {line.get("fund_id", default_fund) for line in lines}
+    for fid in sorted(affected):
+        row = _fund_row(conn, fid)
+        if row["restriction_type"] == "unrestricted":
+            continue
+        dates = conn.execute("""SELECT DISTINCT e.entry_date
+                                 FROM acct_journal_entries e
+                                 JOIN acct_journal_lines l ON l.entry_id = e.id
+                                 WHERE l.fund_id = ? AND e.entry_date >= ?
+                                 ORDER BY e.entry_date""", (fid, entry_date)).fetchall()
+        for item in dates:
+            date = item["entry_date"]
+            available = _fund_available_balance(conn, fid, date)
+            if available < 0:
+                raise InsufficientFundBalance(
+                    f"fund {row['code']} would have {available} cents available on {date}")
 
 
 def _check_restricted_fund_spending(conn, lines, entry_date, source=None) -> None:
