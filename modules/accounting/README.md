@@ -165,7 +165,11 @@ against a restricted fund (expense debits on manual entries or bills) is
 **blocked** when it would exceed available balance
 (`InsufficientFundBalance`). **Release from restriction**
 (`release_from_restriction`) posts a four-line interfund entry that moves net
-assets from the restricted fund to unrestricted when the purpose is met. Invoices
+assets from the restricted fund to unrestricted when the purpose is met. The restricted fund debits donor-restricted equity and credits
+liability-type interfund clearing; the unrestricted fund debits clearing and
+credits unrestricted equity. Clearing must be a liability account, not equity.
+This reduces the restricted fund's available capacity by the released amount
+without moving cash. Invoices
 and bills accept an optional `fund_id`; otherwise they post to the default fund.
 
 Demo: `python -B modules/accounting/demo_nonprofit.py`.

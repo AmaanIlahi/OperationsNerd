@@ -517,9 +517,9 @@ def release_from_restriction(conn, idempotency_key: str, from_fund_id: int, amou
                              unrestricted_net_assets_account_id: int, clearing_account_id: int) -> dict:
     """Moves net assets from a restricted fund to unrestricted when the donor's purpose is met.
 
-    Posts one entry balanced per fund: the restricted fund credits donor-restricted net assets and
-    debits an interfund clearing account; the unrestricted fund credits that clearing account and
-    debits unrestricted net assets. Returns journal_entry().
+    Posts one entry balanced per fund: the restricted fund debits donor-restricted net assets and
+    credits a liability-type interfund clearing account; the unrestricted fund debits that clearing
+    account and credits unrestricted net assets. Returns journal_entry().
     """
     _positive_int("from_fund_id", from_fund_id)
     _cents("amount_cents", amount_cents)
@@ -548,13 +548,13 @@ def release_from_restriction(conn, idempotency_key: str, from_fund_id: int, amou
         clearing = _account_row(conn, clearing_account_id)
         if donor["account_type"] != "equity" or unrestricted["account_type"] != "equity":
             raise InvalidState("donor_restricted and unrestricted_net_assets must be equity accounts")
-        if clearing["account_type"] not in ("equity", "liability"):
-            raise InvalidState("clearing_account must be an equity or liability interfund account")
+        if clearing["account_type"] != "liability":
+            raise InvalidState("clearing_account must be a liability interfund account")
         lines = [
-            {"account_id": donor_restricted_account_id, "credit_cents": amount_cents, "fund_id": from_fund_id},
-            {"account_id": clearing_account_id, "debit_cents": amount_cents, "fund_id": from_fund_id},
-            {"account_id": clearing_account_id, "credit_cents": amount_cents, "fund_id": to_fund},
-            {"account_id": unrestricted_net_assets_account_id, "debit_cents": amount_cents, "fund_id": to_fund},
+            {"account_id": donor_restricted_account_id, "debit_cents": amount_cents, "fund_id": from_fund_id},
+            {"account_id": clearing_account_id, "credit_cents": amount_cents, "fund_id": from_fund_id},
+            {"account_id": clearing_account_id, "debit_cents": amount_cents, "fund_id": to_fund},
+            {"account_id": unrestricted_net_assets_account_id, "credit_cents": amount_cents, "fund_id": to_fund},
         ]
         resolved = []
         for line in lines:
