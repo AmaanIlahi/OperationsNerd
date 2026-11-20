@@ -4,6 +4,8 @@ operations_nerd/db/operations_nerd.db
 *.db-wal
 *.db-shm
 *.sqlite3
+# Automatic backups taken before a module's schema migration (modules/hr/migrate.py)
+*.bak
 
 # Python
 __pycache__/
