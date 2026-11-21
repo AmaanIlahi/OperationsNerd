@@ -47,7 +47,7 @@ python scripts/run_tests.py
 ```
 
 It also runs each standalone module's tests (`modules/<name>/tests/test_*.py`) from the repo root; a path
-fragment selects one module, for example `python scripts/run_tests.py modules/hr`.
+fragment selects one module, for example `python scripts/run_tests.py modules/hr` or `python scripts/run_tests.py modules/accounting`.
 
 The same command runs on every pull request in GitHub Actions (`.github/workflows/tests.yml`).
 
@@ -86,4 +86,7 @@ Output goes to `scripts/benchmark/results/<timestamp>/report.md`. Live full runs
 - **HR (employee records and leave):** `modules/hr/`, standalone like logistics, with versioned migrations in
   `modules/hr/migrations/`. No payroll or other sensitive fields until encryption and access control exist
   (see `modules/hr/README.md`).
+- **Accounting (books, invoices, bills, reports):** `modules/accounting/`, standalone like logistics, with
+  versioned migrations in `modules/accounting/migrations/`. Every amount is whole cents, never a float, and
+  the journal is append-only: correct a mistake with a reversing entry (see `modules/accounting/README.md`).
 - **Core data integrity:** the db layer, `operations_nerd/db/`, with tests in `operations_nerd/tests/`.

@@ -7,9 +7,10 @@ CONTRIBUTING.md describes, and each module's tests (modules/<name>/tests) from
 the repo root, the way their READMEs describe. test_llm_smoke.py is skipped
 because it calls a real model and uses credits.
 
-    python scripts/run_tests.py            # run all
-    python scripts/run_tests.py phase_a    # run only files whose name contains "phase_a"
-    python scripts/run_tests.py modules/hr # run only the HR module's tests
+    python scripts/run_tests.py                    # run all
+    python scripts/run_tests.py phase_a            # only files whose name contains "phase_a"
+    python scripts/run_tests.py modules/hr         # only the HR module's tests
+    python scripts/run_tests.py modules/accounting # only the accounting module's tests
 
 Exit code is 0 only when every selected script exits 0.
 """
