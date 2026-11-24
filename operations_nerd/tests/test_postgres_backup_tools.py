@@ -22,20 +22,35 @@ class BackupToolsTests(unittest.TestCase):
         self.environment.stop()
         self.directory.cleanup()
 
+    def _install_mock_tool(self, directory, name, major, *, extra_lines=None):
+        extra_lines = extra_lines or []
+        if sys.platform == 'win32':
+            path = directory / f'{name}.cmd'
+            lines = ['@echo off', *extra_lines, f'echo {name} (PostgreSQL) {major}.2']
+            path.write_text('\r\n'.join(lines) + '\r\n', encoding='utf-8')
+        else:
+            path = directory / name
+            lines = ['#!/bin/sh', *extra_lines, f'echo "{name} (PostgreSQL) {major}.2"']
+            path.write_text('\n'.join(lines) + '\n')
+            path.chmod(0o700)
+
     def tools(self, folder, dump_major, restore_major=None):
         directory = self.root / folder
         directory.mkdir()
-        for name, major in [('pg_dump', dump_major), ('pg_restore', restore_major if restore_major is not None else dump_major)]:
-            path = directory / name
-            path.write_text(f'#!/bin/sh\necho "{name} (PostgreSQL) {major}.2"\n')
-            path.chmod(0o700)
+        restore_major = restore_major if restore_major is not None else dump_major
+        for name, major in [('pg_dump', dump_major), ('pg_restore', restore_major)]:
+            self._install_mock_tool(directory, name, major)
         return directory
 
     def test_bundled_pair_wins_over_older_path_without_running_old_tool(self):
         old = self.tools('system14', 14)
         bundled = self.tools('bundled16', 16)
         marker = self.root / 'old-tool-was-executed'
-        (old / 'pg_dump').write_text(f'#!/bin/sh\n: > "{marker}"\necho "pg_dump (PostgreSQL) 14.2"\n')
+        if sys.platform == 'win32':
+            self._install_mock_tool(old, 'pg_dump', 14, extra_lines=[f'type nul > "{marker}"'])
+        else:
+            (old / 'pg_dump').write_text(f'#!/bin/sh\n: > "{marker}"\necho "pg_dump (PostgreSQL) 14.2"\n')
+            (old / 'pg_dump').chmod(0o700)
         with patch.dict(os.environ, {'PATH': str(old)}), patch.object(backup, '_bundled_bin', return_value=bundled):
             self.assertEqual(backup._toolchain(16), (str(bundled / 'pg_dump'), str(bundled / 'pg_restore')))
         self.assertFalse(marker.exists())
@@ -53,7 +68,10 @@ class BackupToolsTests(unittest.TestCase):
     def test_pair_must_share_directory_and_server_major(self):
         mixed = self.tools('mixed', 16, 14)
         newer = self.tools('newer', 17)
-        (newer / 'pg_restore').unlink()
+        if sys.platform == 'win32':
+            (newer / 'pg_restore.cmd').unlink()
+        else:
+            (newer / 'pg_restore').unlink()
         with patch.dict(os.environ, {'PATH': str(mixed)}), patch.object(backup, '_bundled_bin', return_value=newer):
             with self.assertRaisesRegex(backup.BackupToolError, 'PostgreSQL 16.*OPERATIONS_PG_BIN'):
                 backup._toolchain(16)
@@ -79,7 +97,10 @@ class BackupToolsTests(unittest.TestCase):
              patch.object(backup.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'fixture failure')):
             with self.assertRaises(backup.BackupToolError):
                 backup._toolchain(16)
-        (tools / 'pg_dump').write_text('#!/bin/sh\necho "unexpected client version"\n')
+        if sys.platform == 'win32':
+            (tools / 'pg_dump.cmd').write_text('@echo off\r\necho unexpected client version\r\n', encoding='utf-8')
+        else:
+            (tools / 'pg_dump').write_text('#!/bin/sh\necho "unexpected client version"\n')
         with patch.object(backup, '_bundled_bin', return_value=tools):
             with self.assertRaises(backup.BackupToolError):
                 backup._toolchain(16)
@@ -95,7 +116,8 @@ class BackupToolsTests(unittest.TestCase):
         captured = []
         def probe(args, **kwargs):
             captured.append(kwargs['env'])
-            return subprocess.CompletedProcess(args, 0, f'{Path(args[0]).name} (PostgreSQL) 16.2\n', '')
+            tool = Path(args[0]).stem
+            return subprocess.CompletedProcess(args, 0, f'{tool} (PostgreSQL) 16.2\n', '')
         with patch.dict(os.environ, {'BASETEN_API_KEY': 'fixture-model-secret', 'PGPASSWORD': 'fixture-db-secret',
                                     'OPERATIONS_DATABASE_URL': 'postgresql://fixture-secret'}), \
              patch.object(backup, '_bundled_bin', return_value=tools), patch.object(backup.subprocess, 'run', side_effect=probe):
