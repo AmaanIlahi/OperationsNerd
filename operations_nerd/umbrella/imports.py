@@ -20,10 +20,8 @@ from db.postgres import CORE_WRITE_LOCK, Connection
 from modules.logistics import db as domain_db
 from modules.logistics.errors import Conflict, ValidationError
 from umbrella import logistics_adapter as adapter
+from umbrella.csv_import_values import MAX_BYTES, MAX_INTEGER, MAX_ROWS, digest as _hash, row_error as _error
 
-MAX_BYTES = 1024 * 1024
-MAX_ROWS = 5000
-MAX_INTEGER = 9223372036854775807
 HEADERS = {
     "customers": ("external_key", "name", "address"),
     "orders": ("external_key", "line_key", "order_number", "customer_record_id", "currency", "order_date",
@@ -38,14 +36,6 @@ def template_csv(kind):
     stream = io.StringIO(newline="")
     csv.writer(stream, lineterminator="\n").writerow(HEADERS[kind])
     return stream.getvalue()
-
-
-def _hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-
-
-def _error(row, field, message):
-    return {"row": row, "field": field, "message": str(message)}
 
 
 def _text(value, label, maximum=500):

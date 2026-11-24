@@ -1,0 +1,77 @@
+{
+  "currency": "USD",
+  "compute_and_disk_base_only": true,
+  "disk_usd_per_gb_month": 0.25,
+  "services": [
+    {
+      "service": "opsnerd-integrated-db",
+      "plan": "1c-2g",
+      "compute_monthly_usd": 25,
+      "disk_gb": 40
+    },
+    {
+      "service": "opsnerd-integrated-auth",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-rest",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-realtime",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-storage",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 10
+    },
+    {
+      "service": "opsnerd-integrated-meta",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-studio",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 1
+    },
+    {
+      "service": "opsnerd-integrated-functions",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-api-gw",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 0
+    },
+    {
+      "service": "opsnerd-integrated-app",
+      "plan": "0.5c-512mb",
+      "compute_monthly_usd": 7,
+      "disk_gb": 2
+    }
+  ],
+  "monthly_base_usd": 101.25,
+  "excluded": [
+    "tax",
+    "bandwidth/egress",
+    "additional build usage",
+    "workspace plan",
+    "future scaling",
+    "offsite backups"
+  ],
+  "credit_balance_verified": false
+}

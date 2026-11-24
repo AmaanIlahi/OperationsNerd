@@ -1,42 +1,54 @@
-# Operations Nerd -- single service. Build context is the repository root.
-#
-#   docker build -t operations-nerd .
-#   docker run -p 8000:8000 -v opsnerd-data:/data \
-#       -e APP_ENV=production -e SESSION_SECRET=... -e GEMINI_API_KEY=... \
-#       -e SIGNUP_INVITE_CODE=... operations-nerd
-#
-# LLM_PROVIDER picks the model provider: gemini (default, needs GEMINI_API_KEY,
-# optional GEMINI_MODEL), anthropic (needs ANTHROPIC_API_KEY, optional
-# ANTHROPIC_MODEL) or stub (no model). Keys are runtime env vars; never bake
-# them into the image.
-#
-# The SQLite file lives on a volume mounted at /data (DATABASE_PATH), never in
-# the image. See documentation/deployment.md.
+# Integrated production app; PostgreSQL belongs to the separate Supabase stack.
+FROM python:3.12-slim-bookworm
 
-FROM python:3.11-slim
+# Match the pinned self-hosted Supabase database. Upgrade server and clients
+# together; startup also checks the actual connected server major.
+ARG PG_MAJOR=17
+
+RUN set -eu; \
+    case "$PG_MAJOR" in 1[0-9]) ;; *) exit 1 ;; esac; \
+    apt-get update; \
+    apt-get install --no-install-recommends -y ca-certificates curl; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    printf '%s\n' 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install --no-install-recommends -y "postgresql-client-${PG_MAJOR}"; \
+    apt-get purge --auto-remove -y curl; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid 10001 app; \
+    useradd --create-home --uid 10001 --gid 10001 app; \
+    install -d -m 0700 -o app -g app /data /data/backups
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DATABASE_PATH=/data/operations_nerd.db
-
-RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /data \
-    && chown app:app /data
+    PYTHONPATH=/app/operations_nerd \
+    APP_ENV=production \
+    OPERATIONS_UMBRELLA_ENABLED=1 \
+    OPERATIONS_PG_BIN=/usr/lib/postgresql/${PG_MAJOR}/bin \
+    OPERATIONS_BACKUP_DIR=/data/backups \
+    MAX_BODY_BYTES=8388608
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Narrow copies keep local data, Supabase configuration and secrets out.
 COPY operations_nerd/ ./operations_nerd/
-COPY scripts/backup_db.py ./scripts/backup_db.py
+COPY scripts/backup_business.py scripts/backup_db.py scripts/check_hosted.py scripts/start_hosted.py scripts/bootstrap_hosted.py ./scripts/
 
 WORKDIR /app/operations_nerd
-USER app
 
 EXPOSE 8000
 
-# The platform sets $PORT; 8000 is the fallback for plain `docker run`.
-# --proxy-headers is off on purpose: the app reads X-Forwarded-* itself, and
-# only from TRUSTED_PROXIES.
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-proxy-headers"]
+# Root only prepares the two mounted directories, then drops uid/gid/groups
+# before executing any command. This handles fresh root-owned hosted disks.
+ENTRYPOINT ["python", "/app/scripts/bootstrap_hosted.py"]
+
+# Validate production config, PG privileges/tools and private backup storage,
+# then exec one uvicorn worker on 0.0.0.0:$PORT (default 8000).
+CMD ["python", "/app/scripts/start_hosted.py"]

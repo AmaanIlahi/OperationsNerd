@@ -1,0 +1,6 @@
+{
+  "kind": "integrated",
+  "prefix": "opsnerd-integrated",
+  "database": "opsnerd_control",
+  "app_port": 8000
+}

@@ -105,6 +105,12 @@ class BackupToolsTests(unittest.TestCase):
             with self.assertRaises(backup.BackupToolError):
                 backup._toolchain(16)
 
+    def test_backup_uses_explicit_tls_ca_instead_of_ambient_settings(self):
+        with patch.dict(os.environ, {'PGSSLROOTCERT': '/wrong/ambient.pem', 'PGSSLMODE': 'disable'}):
+            env = backup._environment('postgresql://fixture:secret@db.example/test?sslmode=verify-full&sslrootcert=%2Ftrusted%2Fca.pem')
+        self.assertEqual(env['PGSSLMODE'], 'verify-full')
+        self.assertEqual(env['PGSSLROOTCERT'], '/trusted/ca.pem')
+
     def test_version_probes_do_not_inherit_model_or_database_credentials(self):
         tools = self.tools('verified', 16)
         captured = []

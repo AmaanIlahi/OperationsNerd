@@ -25,7 +25,7 @@ def _bundled_bin():
 
 
 def _clean_environment():
-    return {key: value for key,value in os.environ.items() if not key.startswith('PG')
+    return {key: value for key,value in os.environ.items() if not key.startswith(('PG', 'BACKUP_S3_'))
             and not any(part in key for part in ('API_KEY','TOKEN','SECRET','PASSWORD','DATABASE_URL'))}
 
 
@@ -89,7 +89,7 @@ def _environment(url):
     params = conninfo_to_dict(url)
     environment = _clean_environment()
     for option,key in [('host','PGHOST'),('hostaddr','PGHOSTADDR'),('port','PGPORT'),
-                       ('dbname','PGDATABASE'),('user','PGUSER'),('password','PGPASSWORD'),('sslmode','PGSSLMODE')]:
+                       ('dbname','PGDATABASE'),('user','PGUSER'),('password','PGPASSWORD'),('sslmode','PGSSLMODE'),('sslrootcert','PGSSLROOTCERT')]:
         if option in params:
             environment[key]=params[option]
     environment['PGPASSFILE']=os.devnull
@@ -144,7 +144,9 @@ def backup_scoped_business(account_id,business_id,directory=None,*,url=None):
         descriptor=os.open(manifest,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(descriptor,'w') as output:
             json.dump(metadata,output,indent=2)
-        return {'archive':str(target),'manifest':str(manifest),'sha256':checksum,'business_id':business_id}
+        from umbrella.backup_storage import store_archive
+        remote = store_archive(target, manifest)
+        return {'archive':str(target),'manifest':str(manifest),'sha256':checksum,'business_id':business_id,'remote':remote}
     except Exception:
         partial.unlink(missing_ok=True)
         raise

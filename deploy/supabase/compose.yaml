@@ -1,0 +1,290 @@
+# Local verification only: all published ports bind loopback.
+name: opsnerd-integrated
+services:
+  db:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/db.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    volumes:
+    - pgdata:/var/lib/postgresql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -h 127.0.0.1 -U supabase_admin -d postgres
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  auth:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/auth.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  rest:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/rest.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  realtime:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/realtime.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  storage:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/storage.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+    - storage:/var/lib/storage
+  meta:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/meta.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  studio:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/studio.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+    - studio:/var/lib/studio
+  functions:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/functions.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+  api-gw:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/api-gw.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run prepare.py first}
+      JWT_SECRET: ${JWT_SECRET:?Run prepare.py first}
+      ANON_KEY: ${ANON_KEY:?Run prepare.py first}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?Run prepare.py first}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Run prepare.py first}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Run prepare.py first}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run prepare.py first}
+      REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?Run prepare.py first}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY:?Run prepare.py first}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:?Run prepare.py first}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:?Run prepare.py
+        first}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Run prepare.py first}
+      APP_ORIGIN: ${APP_ORIGIN:?Run prepare.py first}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:?Run prepare.py first}
+      APP_DB_NAME: opsnerd_control
+      APP_ALLOW_DATABASE_CREATE: 'true'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:${SUPABASE_GATEWAY_PORT:-58000}:8000
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/supabase/images/app.Dockerfile
+    environment:
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      APP_ORIGIN: ${APP_ORIGIN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SIGNUP_INVITE_CODE: ${SIGNUP_INVITE_CODE}
+      DEPLOY_APP_KIND: integrated
+      APP_DB_NAME: opsnerd_control
+      SUPABASE_DB_HOST: db
+      PORT: '8000'
+      APP_ENV: production
+      OPERATIONS_UMBRELLA_ENABLED: '1'
+      OPERATIONS_BACKUP_DIR: /data/backups
+      LLM_PROVIDER: stub
+      TRUSTED_PROXIES: '*'
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:${APP_PORT:-58080}:8000
+    volumes:
+    - backups:/data
+    profiles:
+    - app
+volumes:
+  pgdata: {}
+  storage: {}
+  studio: {}
+  backups: {}
