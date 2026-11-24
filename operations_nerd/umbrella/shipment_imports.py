@@ -10,27 +10,16 @@ from collections import OrderedDict, defaultdict
 import csv
 import hashlib
 import io
-import json
 import re
 
 from db.postgres import CORE_WRITE_LOCK
 from modules.logistics import db as domain_db, stock
 from modules.logistics.errors import Conflict, NotFound, ValidationError
 from umbrella import logistics_adapter as adapter
+from umbrella.csv_import_values import MAX_BYTES, MAX_INTEGER, MAX_ROWS, digest as _hash, row_error as _error
 
 
 HEADERS = ('external_key', 'line_key', 'shipment_number', 'order_ref', 'reservation_id', 'quantity')
-MAX_BYTES = 1024 * 1024
-MAX_ROWS = 5000
-MAX_INTEGER = 9223372036854775807
-
-
-def _hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
-
-
-def _error(row, field, message):
-    return {'row': row, 'field': field, 'message': str(message)}
 
 
 def template_csv(kind='shipments'):
