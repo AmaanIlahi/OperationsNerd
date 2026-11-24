@@ -212,13 +212,8 @@ const LogisticsUI = (() => {
     fill(settings, el('summary', {text: 'Module settings'}),
       el('p', {class: 'muted', text: 'Disable this workspace and its commands while keeping its history. Re-enabling uses the original record mappings.'}), reviewDisable, confirmation);
     fill(target, status, notice, nav, body, settings);
-    function table(titleText, rows, columns) {
-      return el('section', {class: 'logistics-card'}, el('h3', {text: titleText}), rows.length
-        ? el('div', {class: 'table-wrap'}, el('table', null,
-          el('thead', null, el('tr', null, columns.map(([label]) => el('th', {text: label})))),
-          el('tbody', null, rows.map(row => el('tr', null, columns.map(([, get]) => el('td', {text: String(get(row) ?? '')})))))))
-        : el('p', {class: 'logistics-empty', text: 'No ' + titleText.toLowerCase() + ' yet.'}));
-    }
+    const table = (name, rows, columns) =>
+      BusinessModules.renderTable(el, name, rows, columns, 'logistics-empty');
     const optionRows = (rows, label) => rows.map(row => [identifier(row), label(row)]);
     const refOptions = kind => references(kind).map(row => [row.id, refName(row)]);
     function field(label, type, options, value, optional) { return {label, type, options, value, optional}; }

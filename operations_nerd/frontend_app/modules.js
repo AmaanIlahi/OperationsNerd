@@ -17,6 +17,11 @@ const BusinessModules = (() => {
     if (!Number.isSafeInteger(cents)) throw new Error('This amount is too large.');
     return cents;
   }
+  function renderTable(el, name, rows, columns, emptyClass = 'muted') {
+    return el('section', {class: 'logistics-card'}, el('h3', {text: name}), rows?.length ? el('div', {class: 'table-wrap'}, el('table', null,
+      el('thead', null, el('tr', null, columns.map(([name]) => el('th', {text: name})))), el('tbody', null, rows.map(row => el('tr', null, columns.map(([, get]) => el('td', {text: String(get(row) ?? '')})))))))
+      : el('p', {class: emptyClass, text: 'No ' + name.toLowerCase() + ' yet.'}));
+  }
   function register(id, implementation) { registry.set(id, implementation); }
   async function load(nerd) {
     if (registry.has(nerd.id)) return registry.get(nerd.id);
@@ -120,11 +125,7 @@ const BusinessModules = (() => {
   }
   function helpers(ctx) {
     const {el, fill, business, api, id, isCurrent} = ctx, path = `/businesses/${business.id}/${id}`;
-    function table(name, rows, columns) {
-      return el('section', {class: 'logistics-card'}, el('h3', {text: name}), rows?.length ? el('div', {class: 'table-wrap'}, el('table', null,
-        el('thead', null, el('tr', null, columns.map(([name]) => el('th', {text: name})))), el('tbody', null, rows.map(row => el('tr', null, columns.map(([, get]) => el('td', {text: String(get(row) ?? '')})))))))
-        : el('p', {class: 'muted', text: 'No ' + name.toLowerCase() + ' yet.'}));
-    }
+    const table = (name, rows, columns) => renderTable(el, name, rows, columns);
     function input(def) {
       const control = def.type === 'select' ? el('select', {required: !def.optional}, el('option', {value: '', text: 'Choose…'}), (def.options || []).map(([value, text]) => el('option', {value: String(value), text})))
         : el(def.type === 'textarea' ? 'textarea' : 'input', {type: def.type === 'money' ? 'text' : def.type === 'integer' ? 'number' : def.type || 'text', value: def.value ?? '', required: !def.optional,
@@ -198,5 +199,5 @@ const BusinessModules = (() => {
       }}), confirmation);
   }
   function reset() { ++generation; notices.clear(); selectedTabs.clear(); for (const plugin of registry.values()) plugin.reset?.(); }
-  return {register, render, reset};
+  return {register, render, renderTable, reset};
 })();
